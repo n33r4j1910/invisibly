@@ -1,0 +1,1 @@
+C:\Invisibly\target\release\invisibly-daemon.exe: C:\Invisibly\daemon\src\main.rs C:\Invisibly\daemon\src\modules\config.rs C:\Invisibly\daemon\src\modules\crypto.rs C:\Invisibly\daemon\src\modules\detect.rs C:\Invisibly\daemon\src\modules\mod.rs C:\Invisibly\daemon\src\modules\repair.rs C:\Invisibly\daemon\src\modules\server.rs C:\Invisibly\daemon\src\web\dashboard.html

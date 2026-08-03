@@ -1,0 +1,40 @@
+END USER LICENSE AGREEMENT (EULA)
+
+IMPORTANT: PLEASE READ THIS LICENSE CAREFULLY BEFORE USING THE SOFTWARE.
+
+1. LICENSE GRANT
+Invisibly ("Software") is licensed, not sold. The Software is developed and 
+owned by DeltaIQx LLP. The user is granted a non-exclusive, non-transferable 
+license to use the Software for personal or commercial purposes as defined in 
+the purchased subscription plan.
+
+2. RESTRICTIONS
+The user may NOT:
+- Copy, modify, or create derivative works of the Software
+- Reverse engineer, decompile, or disassemble the Software
+- Rent, lease, sublicense, or distribute the Software to third parties
+- Remove any proprietary notices or labels, including the DeltaIQx LLP name
+
+3. SUBSCRIPTION TERMS
+Access to the Software requires a valid paid subscription. Subscription 
+plans, pricing, and features are subject to change with prior notice.
+
+4. NO WARRANTY
+THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS 
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+
+5. LIABILITY
+IN NO EVENT SHALL DELTAIQX LLP BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER 
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, 
+OUT OF OR IN CONNECTION WITH THE SOFTWARE.
+
+6. TERMINATION
+This license is effective until terminated. The license will terminate 
+automatically without notice if the user fails to comply with any term.
+Upon termination, the user must cease all use and delete the Software.
+
+7. GOVERNING LAW
+This agreement shall be governed by the laws of India.
+
+© 2026 DeltaIQx LLP. All rights reserved.

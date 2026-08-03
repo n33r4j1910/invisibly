@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/2010/manifest"
+         xmlns:rescap="http://schemas.microsoft.com/appx/2014/11/manifest">
+    <Identity Name="Invisibly"
+              Publisher="CN=Invisibly"
+              Version="1.0.0.0"/>
+    <Properties>
+        <DisplayName>Invisibly</DisplayName>
+        <Description>Lightweight autonomous endpoint security agent</Description>
+        <PublisherDisplayName>Invisibly</PublisherDisplayName>
+        <Logo>assets\logo.png</Logo>
+    </Properties>
+    <Resources>
+        <Resource Language="en-US"/>
+    </Resources>
+    <Capabilities>
+        <rescap:Capability Name="runFullTrust"/>
+    </Capabilities>
+    <Applications>
+        <Application Id="Invisibly"
+                     Executable="invisibly-daemon.exe"
+                     EntryPoint="Windows.FullTrustApplication"/>
+    </Applications>
+</Package>

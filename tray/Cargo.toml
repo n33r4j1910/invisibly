@@ -1,0 +1,12 @@
+[package]
+name = "invisibly-tray"
+version = "1.0.0"
+edition = "2021"
+authors = ["DeltaIQx LLP"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true }
+tray-icon = { workspace = true }
+windows = { workspace = true }
