@@ -1,8 +1,11 @@
-// Copyright (c) 2026 DeltaIQx LLP. All rights reserved.`n// This software is proprietary and confidential.`n//! Auto-Repair Module - Silent (Dashboard-only alerts)
-//! - Auto-repairs all items silently
-//! - No pop-ups - alerts go to dashboard only
-//! - Ghost Mode auto-enables on public WiFi
-//! - Incident logging to user folder
+// Copyright (c) 2026 DeltaIQx LLP. All rights reserved.
+// This software is proprietary and confidential.
+
+//! Auto-Repair Module — Silent with Safety Levels
+//! - Automatic: DNS, Firewall, Proxy, Defender, UAC, Windows Update, System Restore, SmartScreen, IPv6
+//! - Alert Only: VPN, DoH, LAPS, Event Log
+//! - Confirm Required: HID, BT, Adapter, Startup, Brute Force
+//! - Never Auto (Quarantine): Fake Extensions
 
 use std::process::Command;
 use std::fs;
@@ -10,91 +13,10 @@ use std::path::Path;
 use chrono::Local;
 
 const DATA_DIR: &str = "C:\\ProgramData\\Invisibly";
-const USER_INCIDENT_DIR: &str = "C:\\Users\\";
 
 // ============================================
-// AUTO-REPAIR FUNCTIONS
+// AUTOMATIC REPAIRS (No user input)
 // ============================================
-
-// --- EXISTING AUTO-REPAIRS ---
-
-pub fn quarantine_startup() {
-    let startup = format!("{}\\Microsoft\\Windows\\Start Menu\\Programs\\Startup",
-        std::env::var("APPDATA").unwrap_or_default());
-    if let Ok(entries) = fs::read_dir(&startup) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file() {
-                let name = path.file_name().unwrap().to_string_lossy();
-                let quar = format!("{}\\quarantine\\{}", DATA_DIR, name);
-                let _ = fs::create_dir_all(format!("{}\\quarantine", DATA_DIR));
-                let _ = fs::rename(&path, &quar);
-                log_repair("Startup", &format!("Quarantined: {}", name));
-                log_incident("Startup", "Quarantined", &format!("Startup entry quarantined: {}", name));
-            }
-        }
-    }
-}
-
-pub fn delete_fake_files() {
-    let dirs = ["Desktop", "Downloads"];
-    for dir in &dirs {
-        let path = format!("{}\\{}", std::env::var("USERPROFILE").unwrap_or_default(), dir);
-        if let Ok(entries) = fs::read_dir(&path) {
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().to_lowercase();
-                if name.ends_with(".pdf.exe") || name.ends_with(".doc.exe") ||
-                   name.ends_with(".jpg.exe") || name.ends_with(".txt.exe") ||
-                   name.contains(".exe.") {
-                    let _ = fs::remove_file(entry.path());
-                    log_repair("FakeFiles", &format!("Deleted: {}", name));
-                    log_incident("FakeFiles", "Deleted", &format!("Fake file deleted: {}", name));
-                }
-            }
-        }
-    }
-}
-
-pub fn eject_usb(device: &str) {
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            &format!("Get-PnpDevice -FriendlyName '{}' | Disable-PnpDevice -Confirm:$false", device)])
-        .output();
-    log_repair("USB", &format!("Ejected: {}", device));
-    log_incident("USB", "Ejected", &format!("USB device ejected: {}", device));
-}
-
-pub fn disable_bt_devices() {
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            "Get-PnpDevice -Class Bluetooth | Where-Object {$_.Status -eq 'OK' -and $_.FriendlyName -notmatch 'Intel|Qualcomm|Realtek|Broadcom|MediaTek|Microsoft'} | Disable-PnpDevice -Confirm:$false -ErrorAction SilentlyContinue"])
-        .output();
-    log_repair("Bluetooth", "Disabled unknown BT devices");
-    log_incident("Bluetooth", "Disabled", "Unknown Bluetooth devices disabled");
-}
-
-pub fn disable_hid_devices() {
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            "Get-PnpDevice -Class Keyboard,Mouse | Where-Object {$_.Status -eq 'OK' -and $_.FriendlyName -notmatch 'Microsoft|Logitech|Razer|Dell|HP|Lenovo|Synaptics|Intel'} | Disable-PnpDevice -Confirm:$false -ErrorAction SilentlyContinue"])
-        .output();
-    log_repair("HID", "Disabled unknown HID devices");
-    log_incident("HID", "Disabled", "Unknown HID devices disabled");
-}
-
-pub fn clean_unicode_bidi() {
-    let hosts = "C:\\Windows\\System32\\drivers\\etc\\hosts";
-    if let Ok(content) = fs::read_to_string(hosts) {
-        let cleaned: String = content.chars()
-            .filter(|c| !['\u{202E}', '\u{202D}', '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}',
-                         '\u{200B}', '\u{200C}', '\u{200D}', '\u{200E}', '\u{200F}', '\u{FEFF}',
-                         '\u{202A}', '\u{202B}', '\u{202C}', '\u{00AD}'].contains(c))
-            .collect();
-        let _ = fs::write(hosts, cleaned);
-        log_repair("Bidi", "Cleaned Unicode bidi characters");
-        log_incident("Bidi", "Cleaned", "Unicode bidi characters cleaned from hosts");
-    }
-}
 
 pub fn reset_dns() {
     let _ = Command::new("netsh").args(["interface", "ip", "set", "dns", "Wi-Fi", "dhcp"]).output();
@@ -137,6 +59,68 @@ pub fn enable_defender() {
     log_incident("Defender", "Re-enabled", "Windows Defender re-enabled");
 }
 
+pub fn enable_uac() {
+    let _ = Command::new("powershell")
+        .args(["-NoProfile", "-Command",
+            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' -Name EnableLUA -Value 1"])
+        .output();
+    log_repair("UAC", "Re-enabled");
+    log_incident("UAC", "Re-enabled", "UAC re-enabled");
+}
+
+pub fn enable_windows_update() {
+    let _ = Command::new("powershell")
+        .args(["-NoProfile", "-Command",
+            "Set-Service -Name wuauserv -StartupType Automatic -Status Running"])
+        .output();
+    log_repair("WindowsUpdate", "Re-enabled");
+    log_incident("WindowsUpdate", "Re-enabled", "Windows Update re-enabled");
+}
+
+pub fn enable_system_restore() {
+    let _ = Command::new("powershell")
+        .args(["-NoProfile", "-Command",
+            "Enable-ComputerRestore -Drive 'C:\\'"])
+        .output();
+    let _ = Command::new("powershell")
+        .args(["-NoProfile", "-Command",
+            "Set-Service -Name srservice -StartupType Automatic -Status Running"])
+        .output();
+    log_repair("SystemRestore", "Re-enabled");
+    log_incident("SystemRestore", "Re-enabled", "System Restore re-enabled");
+}
+
+pub fn enable_smart_screen() {
+    let _ = Command::new("powershell")
+        .args(["-NoProfile", "-Command",
+            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer' -Name SmartScreenEnabled -Value 'RequireAdmin'"])
+        .output();
+    let _ = Command::new("powershell")
+        .args(["-NoProfile", "-Command",
+            "Set-MpPreference -EnableSmartScreen $true"])
+        .output();
+    log_repair("SmartScreen", "Re-enabled");
+    log_incident("SmartScreen", "Re-enabled", "SmartScreen re-enabled");
+}
+
+pub fn enable_ipv6() {
+    let _ = Command::new("powershell")
+        .args(["-NoProfile", "-Command",
+            "Enable-NetAdapterBinding -Name '*' -ComponentID ms_tcpip6"])
+        .output();
+    log_repair("IPv6", "Re-enabled");
+    log_incident("IPv6", "Re-enabled", "IPv6 re-enabled");
+}
+
+pub fn set_wifi_private() {
+    let _ = Command::new("powershell")
+        .args(["-NoProfile", "-Command",
+            "Set-NetConnectionProfile -NetworkCategory Private"])
+        .output();
+    log_repair("WiFiProfile", "Set to Private");
+    log_incident("WiFiProfile", "Changed", "WiFi profile set to Private");
+}
+
 pub fn block_ip(ip: &str) {
     let _ = Command::new("netsh")
         .args(["advfirewall", "firewall", "add", "rule",
@@ -162,6 +146,77 @@ pub fn block_bruteforce_ips() {
     log_incident("BruteForce", "Blocked", "Brute force IPs blocked");
 }
 
+// ============================================
+// CONFIRM REQUIRED / QUARANTINE REPAIRS
+// ============================================
+
+pub fn quarantine_startup() {
+    let startup = format!("{}\\Microsoft\\Windows\\Start Menu\\Programs\\Startup",
+        std::env::var("APPDATA").unwrap_or_default());
+    if let Ok(entries) = fs::read_dir(&startup) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                let name = path.file_name().unwrap().to_string_lossy();
+                let quar = format!("{}\\quarantine\\{}", DATA_DIR, name);
+                let _ = fs::create_dir_all(format!("{}\\quarantine", DATA_DIR));
+                let _ = fs::rename(&path, &quar);
+                log_repair("Startup", &format!("Quarantined: {}", name));
+                log_incident("Startup", "Quarantined", &format!("Startup entry quarantined: {}", name));
+            }
+        }
+    }
+}
+
+pub fn delete_fake_files() {
+    // QUARANTINE instead of delete for safety
+    let dirs = ["Desktop", "Downloads"];
+    for dir in &dirs {
+        let path = format!("{}\\{}", std::env::var("USERPROFILE").unwrap_or_default(), dir);
+        if let Ok(entries) = fs::read_dir(&path) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_lowercase();
+                if name.ends_with(".pdf.exe") || name.ends_with(".doc.exe") ||
+                   name.ends_with(".jpg.exe") || name.ends_with(".txt.exe") ||
+                   name.contains(".exe.") {
+                    let quar = format!("{}\\quarantine\\{}", DATA_DIR, name);
+                    let _ = fs::create_dir_all(format!("{}\\quarantine", DATA_DIR));
+                    let _ = fs::rename(entry.path(), &quar);
+                    log_repair("FakeFiles", &format!("Quarantined: {}", name));
+                    log_incident("FakeFiles", "Quarantined", &format!("Fake file quarantined: {}", name));
+                }
+            }
+        }
+    }
+}
+
+pub fn eject_usb(device: &str) {
+    let _ = Command::new("powershell")
+        .args(["-NoProfile", "-Command",
+            &format!("Get-PnpDevice -FriendlyName '{}' | Disable-PnpDevice -Confirm:$false", device)])
+        .output();
+    log_repair("USB", &format!("Ejected: {}", device));
+    log_incident("USB", "Ejected", &format!("USB device ejected: {}", device));
+}
+
+pub fn disable_bt_devices() {
+    let _ = Command::new("powershell")
+        .args(["-NoProfile", "-Command",
+            "Get-PnpDevice -Class Bluetooth | Where-Object {$_.Status -eq 'OK' -and $_.FriendlyName -notmatch 'Intel|Qualcomm|Realtek|Broadcom|MediaTek|Microsoft'} | Disable-PnpDevice -Confirm:$false -ErrorAction SilentlyContinue"])
+        .output();
+    log_repair("Bluetooth", "Disabled unknown BT devices");
+    log_incident("Bluetooth", "Disabled", "Unknown Bluetooth devices disabled");
+}
+
+pub fn disable_hid_devices() {
+    let _ = Command::new("powershell")
+        .args(["-NoProfile", "-Command",
+            "Get-PnpDevice -Class Keyboard,Mouse | Where-Object {$_.Status -eq 'OK' -and $_.FriendlyName -notmatch 'Microsoft|Logitech|Razer|Dell|HP|Lenovo|Synaptics|Intel'} | Disable-PnpDevice -Confirm:$false -ErrorAction SilentlyContinue"])
+        .output();
+    log_repair("HID", "Disabled unknown HID devices");
+    log_incident("HID", "Disabled", "Unknown HID devices disabled");
+}
+
 pub fn disable_unknown_adapters() {
     let _ = Command::new("powershell")
         .args(["-NoProfile", "-Command",
@@ -170,6 +225,24 @@ pub fn disable_unknown_adapters() {
     log_repair("Adapter", "Disabled unknown adapters");
     log_incident("Adapter", "Disabled", "Unknown network adapters disabled");
 }
+
+pub fn clean_unicode_bidi() {
+    let hosts = "C:\\Windows\\System32\\drivers\\etc\\hosts";
+    if let Ok(content) = fs::read_to_string(hosts) {
+        let cleaned: String = content.chars()
+            .filter(|c| !['\u{202E}', '\u{202D}', '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}',
+                         '\u{200B}', '\u{200C}', '\u{200D}', '\u{200E}', '\u{200F}', '\u{FEFF}',
+                         '\u{202A}', '\u{202B}', '\u{202C}', '\u{00AD}'].contains(c))
+            .collect();
+        let _ = fs::write(hosts, cleaned);
+        log_repair("Bidi", "Cleaned Unicode bidi characters");
+        log_incident("Bidi", "Cleaned", "Unicode bidi characters cleaned from hosts");
+    }
+}
+
+// ============================================
+// ALERT ONLY REPAIRS
+// ============================================
 
 pub fn alert_bloatware() {
     log_repair("Bloatware", "Bloatware/PUP detected");
@@ -196,97 +269,21 @@ pub fn alert_service_change() {
     log_incident("ServiceChange", "Alert", "Windows Service changed");
 }
 
-// ============================================
-// NEW: Auto-Repairs for 10 Missing Gaps
-// ============================================
-
-// 1. UAC
-pub fn enable_uac() {
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' -Name EnableLUA -Value 1"])
-        .output();
-    log_repair("UAC", "Re-enabled");
-    log_incident("UAC", "Re-enabled", "UAC re-enabled");
-}
-
-// 2. Windows Update
-pub fn enable_windows_update() {
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            "Set-Service -Name wuauserv -StartupType Automatic -Status Running"])
-        .output();
-    log_repair("WindowsUpdate", "Re-enabled");
-    log_incident("WindowsUpdate", "Re-enabled", "Windows Update re-enabled");
-}
-
-// 3. System Restore
-pub fn enable_system_restore() {
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            "Enable-ComputerRestore -Drive 'C:\\'"])
-        .output();
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            "Set-Service -Name srservice -StartupType Automatic -Status Running"])
-        .output();
-    log_repair("SystemRestore", "Re-enabled");
-    log_incident("SystemRestore", "Re-enabled", "System Restore re-enabled");
-}
-
-// 4. SmartScreen
-pub fn enable_smart_screen() {
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer' -Name SmartScreenEnabled -Value 'RequireAdmin'"])
-        .output();
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            "Set-MpPreference -EnableSmartScreen $true"])
-        .output();
-    log_repair("SmartScreen", "Re-enabled");
-    log_incident("SmartScreen", "Re-enabled", "SmartScreen re-enabled");
-}
-
-// 5. IPv6
-pub fn enable_ipv6() {
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            "Enable-NetAdapterBinding -Name '*' -ComponentID ms_tcpip6"])
-        .output();
-    log_repair("IPv6", "Re-enabled");
-    log_incident("IPv6", "Re-enabled", "IPv6 re-enabled");
-}
-
-// 6. WiFi Profile (set to Private)
-pub fn set_wifi_private() {
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            "Set-NetConnectionProfile -NetworkCategory Private"])
-        .output();
-    log_repair("WiFiProfile", "Set to Private");
-    log_incident("WiFiProfile", "Changed", "WiFi profile set to Private");
-}
-
-// 7. Event Log (Alert only)
 pub fn alert_event_log_cleared() {
     log_repair("EventLog", "Alert - Event log was cleared");
     log_incident("EventLog", "Alert", "Event log was cleared - investigation recommended");
 }
 
-// 8. VPN (Alert only)
 pub fn alert_vpn_disconnected() {
     log_repair("VPN", "Alert - VPN disconnected");
     log_incident("VPN", "Alert", "VPN disconnected - check your connection");
 }
 
-// 9. DoH (Alert only)
 pub fn alert_doh_changed() {
     log_repair("DoH", "Alert - DNS over HTTPS changed");
     log_incident("DoH", "Alert", "DNS over HTTPS setting changed");
 }
 
-// 10. LAPS (Alert only)
 pub fn alert_laps_changed() {
     log_repair("LAPS", "Alert - LAPS status changed");
     log_incident("LAPS", "Alert", "LAPS status changed");
@@ -361,12 +358,7 @@ fn log_repair(action: &str, details: &str) {
     let _ = fs::write(&log_path, entry);
 }
 
-// ============================================
-// INCIDENT LOGGING (User Folder)
-// ============================================
-
 fn log_incident(category: &str, action: &str, details: &str) {
-    let username = std::env::var("USERNAME").unwrap_or_default();
     let user_dir = format!("{}\\Invisibly\\incidents", std::env::var("USERPROFILE").unwrap_or_default());
     let _ = fs::create_dir_all(&user_dir);
     
@@ -385,9 +377,7 @@ fn log_incident(category: &str, action: &str, details: &str) {
          DETAILS:\n\
          {}\n\
          \n\
-         ========================================\n\
-         This incident was automatically handled by Invisibly.\n\
-         Review the dashboard for more details.\n",
+         ========================================\n",
         Local::now().format("%Y-%m-%d %H:%M:%S"),
         category,
         action,

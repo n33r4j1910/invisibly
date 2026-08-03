@@ -6,6 +6,7 @@ use serde::Deserialize;
 use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
 use windows::Win32::System::Threading::CreateMutexW;
 use windows::core::w;
+use std::time::Duration;
 
 #[derive(Debug, Deserialize)]
 struct DaemonStatus {

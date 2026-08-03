@@ -11,7 +11,7 @@
         h1 { font-size: 28px; font-weight: 600; display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
         h1 small { font-size: 14px; font-weight: 400; color: #7b8aa3; }
         .subtitle { color: #7b8aa3; font-size: 14px; margin-bottom: 28px; border-left: 3px solid #2a6bff; padding-left: 16px; }
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 28px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; margin-bottom: 28px; }
         .stat { background: #1e2633; border-radius: 14px; padding: 18px 22px; border: 1px solid #2a3344; }
         .stat .label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: #7b8aa3; margin-bottom: 6px; }
         .stat .value { font-size: 26px; font-weight: 600; }
@@ -23,6 +23,7 @@
         .badge.blue { background: #0f2640; color: #4a9eff; }
         .badge.gray { background: #2a2f3a; color: #8a9ab5; }
         .badge.ghost { background: #0f2640; color: #4a9eff; border: 1px solid #2a6bff; }
+        .badge.purple { background: #2a0f40; color: #b04aff; }
         .btn-group { display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0 24px; }
         .btn { background: #1e2633; border: 1px solid #2a3344; color: #e4e7ed; padding: 10px 22px; border-radius: 40px; font-size: 14px; font-weight: 500; cursor: pointer; transition: 0.15s; }
         .btn:hover { background: #2a3344; border-color: #3f4b5f; }
@@ -36,6 +37,8 @@
         .btn.ghost-btn:hover { background: #1a3a60; }
         .btn.toggle-on { background: #0f3b2a; border-color: #2a8a5a; color: #4cd9a0; }
         .btn.toggle-off { background: #3d1a1a; border-color: #8a2a2a; color: #ff6b6b; }
+        .btn.verify-btn { background: #2a0f40; border-color: #6b2a8a; color: #b04aff; }
+        .btn.verify-btn:hover { background: #3a1a50; }
         .events { margin-top: 20px; border-top: 1px solid #1e2633; padding-top: 16px; }
         .events h3 { font-size: 15px; font-weight: 500; color: #7b8aa3; margin-bottom: 12px; }
         .event { background: #1a212b; padding: 10px 16px; border-radius: 10px; border-left: 3px solid #2a3344; margin-bottom: 6px; font-size: 14px; display: flex; justify-content: space-between; }
@@ -46,6 +49,8 @@
         .event.ok { border-left-color: #4cd9a0; }
         .event.ghost { border-left-color: #4a9eff; }
         .event.info { border-left-color: #4a7aff; }
+        .event.highlight { animation: highlightFade 2s ease-out; }
+        @keyframes highlightFade { 0% { background: #2a4b3a; } 100% { background: #1a212b; } }
         .footer { margin-top: 20px; color: #4a5a73; font-size: 12px; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
         .footer a { color: #4a7aff; text-decoration: none; cursor: pointer; }
         .footer a:hover { text-decoration: underline; }
@@ -54,12 +59,23 @@
         .info-box { background: #0f1a2a; border: 1px solid #2a4b6b; border-radius: 10px; padding: 12px 18px; color: #7a9abb; font-size: 14px; margin-bottom: 16px; }
         .info-box strong { color: #4a9eff; }
         @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
-        .status-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-        .toggle-label { font-size: 14px; color: #7b8aa3; }
-        .ghost-indicator { display: inline-flex; align-items: center; gap: 8px; background: #0f2640; padding: 6px 16px 6px 12px; border-radius: 40px; border: 1px solid #2a6bff; font-size: 14px; color: #4a9eff; margin-bottom: 16px; }
-        .ghost-indicator .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #4a9eff; animation: pulse 1.6s infinite; }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
-        .tag { display: inline-block; font-size: 11px; background: #2a3344; color: #7b8aa3; padding: 2px 10px; border-radius: 20px; margin-left: 8px; }
+        .score-ring { display: inline-block; width: 70px; height: 70px; border-radius: 50%; border: 5px solid #2a3344; text-align: center; line-height: 60px; font-size: 24px; font-weight: 700; transition: all 0.5s ease; }
+        .score-ring.high { border-color: #4cd9a0; color: #4cd9a0; }
+        .score-ring.medium { border-color: #f5c542; color: #f5c542; }
+        .score-ring.low { border-color: #f55a5a; color: #f55a5a; }
+        .score-ring.animate { animation: pulseRing 0.5s ease-out; }
+        @keyframes pulseRing { 0% { transform: scale(1.1); } 50% { transform: scale(0.95); } 100% { transform: scale(1); } }
+        .control-status-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 10px; }
+        .control-item { font-size: 12px; padding: 4px 8px; border-radius: 4px; background: #1a212b; }
+        .control-item .status { font-weight: 600; }
+        .control-item .ok { color: #4cd9a0; }
+        .control-item .warn { color: #f5c542; }
+        .control-item .err { color: #f55a5a; }
+        .timestamp { font-size: 12px; color: #4a5a73; margin-top: 4px; }
+        .trust-value { display: inline-block; transition: all 0.3s ease; }
+        .trust-value.high { color: #4cd9a0; }
+        .trust-value.medium { color: #f5c542; }
+        .trust-value.low { color: #f55a5a; }
     </style>
 </head>
 <body>
@@ -68,32 +84,42 @@
     <div class="subtitle">Autonomous endpoint security agent — Silent · Dashboard-only alerts</div>
 
     <div class="info-box">
-        <strong>🔍 Silent Mode:</strong> All detections and repairs happen automatically.
-        Alerts are displayed here and in the system tray. <strong>No pop-ups.</strong>
+        <strong>🟢 System Health:</strong> Current state of all controls.<br>
+        <strong>🔵 Trust Level:</strong> Historical confidence (0–100). Slowly recovers, drops on significant events.
+        <span style="display:block;margin-top:4px;" id="last-refresh-time">Last updated: —</span>
     </div>
 
     <div id="status-grid">
         <div class="grid">
             <div class="stat">
-                <div class="label">Trust State</div>
-                <div class="value"><span id="trust-badge" class="badge gray">Loading...</span></div>
-                <div class="sub" id="trust-sub">Last check: —</div>
+                <div class="label">System Health</div>
+                <div class="value"><span id="score-value" class="score-ring high">—</span></div>
+                <div class="sub" id="score-sub">Loading...</div>
             </div>
             <div class="stat">
-                <div class="label">Ghost Mode</div>
-                <div class="value"><span id="ghost-badge" class="badge gray">Off</span></div>
-                <div class="sub" id="ghost-sub">No active lockdown</div>
+                <div class="label">Trust Level</div>
+                <div class="value"><span id="trust-value" class="trust-value high">—</span></div>
+                <div class="sub" id="trust-sub">Historical confidence</div>
             </div>
             <div class="stat">
-                <div class="label">Threat Score</div>
-                <div class="value"><span id="score-value">—</span><span style="color:#7b8aa3;font-size:16px;margin-left:4px;">/ 100</span></div>
-                <div class="sub" id="score-sub">Based on active detections</div>
+                <div class="label">State</div>
+                <div class="value"><span id="state-badge" class="badge gray">Loading...</span></div>
+                <div class="sub" id="state-sub">—</div>
             </div>
-            <div class="stat">
-                <div class="label">Events</div>
-                <div class="value"><span id="event-count">0</span></div>
-                <div class="sub">Last 10 alerts</div>
-            </div>
+        </div>
+    </div>
+
+    <div id="controls-section">
+        <div class="stat" style="margin-bottom: 16px;">
+            <div class="label">Control Status</div>
+            <div id="controls-list"><p style="color:#4a5a73;font-size:14px;">No controls loaded.</p></div>
+        </div>
+    </div>
+
+    <div id="deductions-section">
+        <div class="stat" style="margin-bottom: 16px;">
+            <div class="label">Deductions</div>
+            <div id="deductions-list"><p style="color:#4a5a73;font-size:14px;">No deductions — system is maintained.</p></div>
         </div>
     </div>
 
@@ -105,6 +131,7 @@
         <button class="btn" id="btn-reset">🔄 Reset Baseline</button>
         <button class="btn" id="btn-sanitize">🧹 Scan for Issues</button>
         <button class="btn danger" id="btn-rollback">↩️ Rollback Changes</button>
+        <button class="btn verify-btn" id="btn-verify">✅ Verify Trust</button>
     </div>
 
     <div class="controls-title">🔘 Status</div>
@@ -114,15 +141,15 @@
         <span class="toggle-label" id="ts2-status">Status: <strong>Enabled</strong></span>
     </div>
 
-    <div id="ghost-indicator" style="display:none;" class="ghost-indicator">
-        <span class="dot"></span> Ghost Mode Active — Full Lockdown
+    <div id="ghost-indicator" style="display:none;" class="ghost-indicator" style="display:inline-flex; align-items:center; gap:8px; background:#0f2640; padding:6px 16px 6px 12px; border-radius:40px; border:1px solid #2a6bff; font-size:14px; color:#4a9eff; margin-bottom:16px;">
+        <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#4a9eff; animation:pulse 1.6s infinite;"></span> Ghost Mode Active — Full Lockdown
     </div>
 
     <div class="token-box">🔑 Token: <span id="token-value">Loading...</span></div>
 
     <div class="events" id="events-section">
-        <h3>📋 Recent Alerts</h3>
-        <div id="events-list"><p style="color:#4a5a73;font-size:14px;">No alerts yet</p></div>
+        <h3>📋 Recent Events</h3>
+        <div id="events-list"><p style="color:#4a5a73;font-size:14px;">No events yet</p></div>
     </div>
 
     <div class="footer">
@@ -134,7 +161,10 @@
 <script>
 const API = '/';
 const TOKEN_API = '/token';
+const TIMELINE_API = '/timeline?format=json';
 let token = '';
+let lastScore = -1;
+let lastState = '';
 
 async function apiFetch(endpoint, method = 'GET', body = null) {
     const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
@@ -157,66 +187,159 @@ async function fetchToken() {
 
 function render(data) {
     if (!data || data.error) {
-        document.getElementById('trust-badge').textContent = '❌ Offline';
-        document.getElementById('trust-badge').className = 'badge gray';
+        document.getElementById('state-badge').textContent = '❌ Offline';
+        document.getElementById('state-badge').className = 'badge gray';
         return;
     }
 
-    const trust = data.trust_state || 'Unknown';
-    const ghost = data.ghost || false;
-    const enabled = data.enabled !== undefined ? data.enabled : true;
-    const events = data.events || [];
+    const score = data.integrity_score || 0;
+    const state = data.integrity_state || 'Unknown';
+    const trustLevel = data.trust_level || 0;
 
-    const trustMap = {
-        'Trusted': { label: '🟢 Trusted', cls: 'green' },
-        'Warning': { label: '🟡 Warning', cls: 'yellow' },
+    // Update timestamp
+    document.getElementById('last-refresh-time').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
+
+    // Score with animation
+    const scoreEl = document.getElementById('score-value');
+    if (score !== lastScore) {
+        scoreEl.className = 'score-ring animate';
+        lastScore = score;
+    }
+    
+    let scoreClass = 'high';
+    let scoreText = '✅ System healthy';
+    if (score < 70) { scoreClass = 'low'; scoreText = '🔴 Action required'; }
+    else if (score < 90) { scoreClass = 'medium'; scoreText = '⚠️ Issues detected'; }
+    scoreEl.className = `score-ring ${scoreClass}`;
+    scoreEl.textContent = score;
+    document.getElementById('score-sub').textContent = scoreText;
+
+    // Trust level with color
+    const trustEl = document.getElementById('trust-value');
+    let trustClass = 'high';
+    if (trustLevel < 50) trustClass = 'low';
+    else if (trustLevel < 80) trustClass = 'medium';
+    trustEl.className = `trust-value ${trustClass}`;
+    trustEl.textContent = trustLevel;
+    document.getElementById('trust-sub').textContent = trustLevel >= 80 ? '✅ High confidence' : trustLevel >= 50 ? '⚠️ Medium confidence' : '🔴 Low confidence';
+
+    // State badge with animation
+    const stateMap = {
+        'Maintained': { label: '✅ Maintained', cls: 'green' },
+        'DriftDetected': { label: '⚠️ Drift Detected', cls: 'yellow' },
         'Compromised': { label: '🔴 Compromised', cls: 'red' },
-        'Ghost': { label: '🔵 Ghost Mode', cls: 'ghost' },
+        'Lockdown': { label: '🔵 Lockdown', cls: 'ghost' },
+        'Invalid': { label: '❌ Invalid', cls: 'gray' },
+        'Unknown': { label: '⚪ Unknown', cls: 'gray' },
     };
-    const t = trustMap[trust] || { label: '⚪ ' + trust, cls: 'gray' };
-    document.getElementById('trust-badge').textContent = t.label;
-    document.getElementById('trust-badge').className = `badge ${t.cls}`;
-    document.getElementById('trust-sub').textContent = `Last check: ${new Date().toLocaleTimeString()}`;
+    const s = stateMap[state] || { label: '⚪ ' + state, cls: 'gray' };
+    const badgeEl = document.getElementById('state-badge');
+    if (state !== lastState) {
+        badgeEl.style.animation = 'none';
+        setTimeout(() => badgeEl.style.animation = 'highlightFade 0.5s ease-out', 10);
+        lastState = state;
+    }
+    badgeEl.textContent = s.label;
+    badgeEl.className = `badge ${s.cls}`;
+    document.getElementById('state-sub').textContent = `Last check: ${new Date().toLocaleTimeString()}`;
 
-    if (ghost) {
-        document.getElementById('ghost-badge').textContent = '🔵 Active';
-        document.getElementById('ghost-badge').className = 'badge ghost';
-        document.getElementById('ghost-sub').textContent = 'Full lockdown active';
+    // Ghost indicator
+    if (data.ghost) {
         document.getElementById('ghost-indicator').style.display = 'inline-flex';
     } else {
-        document.getElementById('ghost-badge').textContent = '⚪ Off';
-        document.getElementById('ghost-badge').className = 'badge gray';
-        document.getElementById('ghost-sub').textContent = 'No active lockdown';
         document.getElementById('ghost-indicator').style.display = 'none';
     }
 
+    // Status
     const statusEl = document.getElementById('ts2-status');
-    if (enabled) {
+    if (data.enabled) {
         statusEl.innerHTML = 'Status: <strong style="color:#4cd9a0;">Enabled</strong> (Active)';
     } else {
         statusEl.innerHTML = 'Status: <strong style="color:#ff6b6b;">Disabled</strong> (Monitor only)';
     }
 
-    let score = trust === 'Trusted' ? 100 : trust === 'Ghost' ? 85 : trust === 'Warning' ? 60 : 30;
-    document.getElementById('score-value').textContent = score;
-    const scoreMsgs = {
-        'Trusted': '✅ System clean',
-        'Ghost': '🛡️ Ghost Mode active',
-        'Warning': '⚠️ Review changes',
-        'Compromised': '🔴 Action required'
-    };
-    document.getElementById('score-sub').textContent = scoreMsgs[trust] || '📊 Monitoring active';
+    // Fetch report for controls and deductions
+    fetchReport();
 
-    document.getElementById('event-count').textContent = events.length;
-    if (events.length === 0) {
-        document.getElementById('events-list').innerHTML = '<p style="color:#4a5a73;font-size:14px;">No alerts yet</p>';
-    } else {
-        document.getElementById('events-list').innerHTML = events.slice(0, 10).map(e => {
-            const cls = e.includes('error') || e.includes('fail') ? 'error' :
-                        e.includes('warning') || e.includes('suspicious') ? 'warn' :
-                        e.includes('ghost') ? 'ghost' : 'info';
-            return `<div class="event ${cls}"><span class="desc">${e}</span><span class="time">${new Date().toLocaleTimeString()}</span></div>`;
+    // Fetch timeline for events
+    fetchTimeline();
+}
+
+async function fetchTimeline() {
+    try {
+        const resp = await fetch(TIMELINE_API);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const entries = data.entries || [];
+        
+        if (entries.length === 0) {
+            document.getElementById('events-list').innerHTML = '<p style="color:#4a5a73;font-size:14px;">No events yet</p>';
+            return;
+        }
+
+        const eventsHtml = entries.slice(0, 10).map(e => {
+            const desc = `${e.category}: ${e.action} — ${e.before} → ${e.after}`;
+            const cls = e.category === 'error' || e.category === 'fail' ? 'error' :
+                        e.category === 'warning' || e.category === 'suspicious' ? 'warn' :
+                        e.category === 'ghost' ? 'ghost' : 'info';
+            const time = e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : '';
+            return `<div class="event ${cls} highlight"><span class="desc">${desc}</span><span class="time">${time}</span></div>`;
         }).join('');
+        
+        document.getElementById('events-list').innerHTML = eventsHtml;
+        document.getElementById('event-count').textContent = entries.length;
+    } catch (error) {
+        console.error('Timeline fetch error:', error);
+        document.getElementById('events-list').innerHTML = '<p style="color:#f55a5a;">⚠️ Error loading events</p>';
+    }
+}
+
+async function fetchReport() {
+    try {
+        const resp = await fetch('/report');
+        if (!resp.ok) return;
+        const report = await resp.json();
+
+        // Controls
+        if (report.control_status && Object.keys(report.control_status).length > 0) {
+            let html = '<div class="control-status-grid">';
+            for (const [name, status] of Object.entries(report.control_status)) {
+                const statusClass = status.status === 'Healthy' ? 'ok' :
+                                    status.status === 'Warning' ? 'warn' : 'err';
+                const statusIcon = status.status === 'Healthy' ? '✅' :
+                                    status.status === 'Warning' ? '⚠️' : '🔴';
+                html += `<div class="control-item">
+                    <span class="status ${statusClass}">${statusIcon} ${name}</span>
+                    <span style="color:#7b8aa3;font-size:10px;display:block;">${status.reason}</span>
+                </div>`;
+            }
+            html += '</div>';
+            document.getElementById('controls-list').innerHTML = html;
+        } else {
+            document.getElementById('controls-list').innerHTML = '<p style="color:#4a5a73;font-size:14px;">No controls loaded.</p>';
+        }
+
+        // Deductions
+        if (report.deductions && report.deductions.length > 0) {
+            let html = '<ul style="list-style:none;padding:0;">';
+            report.deductions.forEach(d => {
+                const color = d.severity === 'Critical' ? '#ff4444' :
+                              d.severity === 'High' ? '#ff8800' :
+                              d.severity === 'Medium' ? '#ffcc00' : '#44aaff';
+                html += `<li style="border-left:3px solid ${color};padding:4px 10px;margin:4px 0;font-size:13px;background:#1a212b;border-radius:4px;">
+                    <strong>${d.category}</strong> — <span style="color:#ff6b6b;">-${d.points} points</span><br>
+                    <span style="color:#7b8aa3;font-size:12px;">${d.reason}</span>
+                </li>`;
+            });
+            html += '</ul>';
+            document.getElementById('deductions-list').innerHTML = html;
+        } else {
+            document.getElementById('deductions-list').innerHTML = '<p style="color:#4cd9a0;font-size:14px;">✅ No deductions — system is maintained.</p>';
+        }
+    } catch (error) {
+        console.error('Report error:', error);
+        document.getElementById('controls-list').innerHTML = '<p style="color:#f55a5a;font-size:14px;">❌ Error loading controls</p>';
+        document.getElementById('deductions-list').innerHTML = '<p style="color:#f55a5a;font-size:14px;">❌ Error loading deductions</p>';
     }
 }
 
@@ -227,8 +350,8 @@ async function refresh() {
         const data = await resp.json();
         render(data);
     } catch {
-        document.getElementById('trust-badge').textContent = '⚠️ Daemon offline';
-        document.getElementById('trust-badge').className = 'badge gray';
+        document.getElementById('state-badge').textContent = '⚠️ Daemon offline';
+        document.getElementById('state-badge').className = 'badge gray';
         document.getElementById('events-list').innerHTML = '<p style="color:#f55a5a;">⚠️ Cannot connect to daemon</p>';
     }
 }
@@ -261,6 +384,8 @@ document.getElementById('btn-rollback').addEventListener('click', () => {
         callApi('/rollback', 'Rollback complete');
     }
 });
+document.getElementById('btn-verify').addEventListener('click', () => callApi('/verify_trust', 'Trust verified'));
+
 document.getElementById('btn-enable').addEventListener('click', () => callApi('/enable', 'Invisibly enabled'));
 document.getElementById('btn-disable').addEventListener('click', () => callApi('/disable', 'Invisibly disabled'));
 document.getElementById('refresh-link').addEventListener('click', (e) => { e.preventDefault(); refresh(); });

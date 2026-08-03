@@ -1,20 +1,26 @@
-// Copyright (c) 2026 DeltaIQx LLP. All rights reserved.`n// This software is proprietary and confidential.`n//! Local HTTP API Server - Hybrid
+// Copyright (c) 2026 DeltaIQx LLP. All rights reserved.
+// This software is proprietary and confidential.
+
+//! Local HTTP API Server — Hybrid with Integrity Score + Trust Level
 use std::io::prelude::*;
 use std::net::{TcpListener, TcpStream};
 use std::fs;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::path::Path;
+
+use crate::modules::integrity::IntegrityReport;
+use crate::modules::trust;
+use crate::modules::timeline;
 
 const DATA_DIR: &str = "C:\\ProgramData\\Invisibly";
 const PORT: u16 = 12790;
 const BIND_ADDR: &str = "127.0.0.1";
 
 // ============================================
-// TRUST STATE
+// TRUST STATE (Legacy)
 // ============================================
 
-static TRUST_STATE: std::sync::atomic::AtomicPtr<&'static str> = 
-    std::sync::atomic::AtomicPtr::new("Trusted\0".as_ptr() as *mut _);
+static TRUST_STATE: AtomicPtr<&'static str> = AtomicPtr::new("Trusted\0".as_ptr() as *mut _);
 
 pub fn set_trust_state(state: &'static str) {
     let ptr = state.as_ptr() as *mut _;
@@ -62,7 +68,55 @@ pub fn is_ts2_enabled() -> bool {
 }
 
 // ============================================
-// TOKEN
+// INTEGRITY REPORT
+// ============================================
+
+static INTEGRITY_REPORT: AtomicPtr<IntegrityReport> = AtomicPtr::new(std::ptr::null_mut());
+
+pub fn set_integrity_report(report: IntegrityReport) {
+    let boxed = Box::new(report);
+    let ptr = Box::into_raw(boxed);
+    let old = INTEGRITY_REPORT.swap(ptr, Ordering::Release);
+    if !old.is_null() {
+        unsafe { drop(Box::from_raw(old)); }
+    }
+}
+
+pub fn get_integrity_report() -> Option<IntegrityReport> {
+    let ptr = INTEGRITY_REPORT.load(Ordering::Acquire);
+    if ptr.is_null() {
+        None
+    } else {
+        unsafe { Some((*ptr).clone()) }
+    }
+}
+
+// ============================================
+// TRUST LEVEL (Historical)
+// ============================================
+
+static TRUST_LEVEL: AtomicPtr<u8> = AtomicPtr::new(std::ptr::null_mut());
+
+pub fn set_trust_level(score: u8) {
+    let boxed = Box::new(score);
+    let ptr = Box::into_raw(boxed);
+    let old = TRUST_LEVEL.swap(ptr, Ordering::Release);
+    if !old.is_null() {
+        unsafe { drop(Box::from_raw(old)); }
+    }
+}
+
+pub fn get_trust_level() -> u8 {
+    let ptr = TRUST_LEVEL.load(Ordering::Acquire);
+    if ptr.is_null() {
+        trust::get_trust_score()
+    } else {
+        unsafe { *ptr }
+    }
+}
+
+// ============================================
+// TOKEN — Injected server-side, not exposed via API
 // ============================================
 
 fn get_token() -> String {
@@ -77,13 +131,31 @@ fn get_token() -> String {
 }
 
 // ============================================
+// CORS — Restricted to localhost only
+// ============================================
+
+fn cors_allowed_origin() -> &'static str {
+    "http://127.0.0.1:12790"
+}
+
+fn cors_headers() -> String {
+    format!(
+        "Access-Control-Allow-Origin: {}\r\n\
+         Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n\
+         Access-Control-Allow-Headers: Content-Type, Authorization\r\n",
+        cors_allowed_origin()
+    )
+}
+
+// ============================================
 // HTTP HELPERS
 // ============================================
 
 fn json_response(status: u16, body: &str) -> String {
     format!(
-        "HTTP/1.1 {}\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\n\r\n{}",
+        "HTTP/1.1 {}\r\n{}Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
         status_string(status),
+        cors_headers(),
         body.len(),
         body
     )
@@ -102,7 +174,8 @@ fn status_string(code: u16) -> &'static str {
 
 fn html_response(body: &str) -> String {
     format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n{}",
+        "HTTP/1.1 200 OK\r\n{}Content-Type: text/html\r\nContent-Length: {}\r\n\r\n{}",
+        cors_headers(),
         body.len(),
         body
     )
@@ -113,12 +186,30 @@ fn unauthorized() -> String {
 }
 
 // ============================================
+// PARSE QUERY PARAM
+// ============================================
+
+fn parse_query_param(request: &str, param: &str) -> Option<String> {
+    if let Some(pos) = request.find(&format!("{}=", param)) {
+        let start = pos + param.len() + 1;
+        let end = request[start..].find(&['&', ' '][..])
+            .map(|i| start + i)
+            .unwrap_or(request.len());
+        let value = request[start..end].trim();
+        if !value.is_empty() {
+            return Some(value.to_string());
+        }
+    }
+    None
+}
+
+// ============================================
 // ROLLBACK FUNCTION
 // ============================================
 
 pub fn rollback_changes() -> String {
     let mut results = Vec::new();
-    
+
     // 1. Restore hosts file from backup
     let hosts = "C:\\Windows\\System32\\drivers\\etc\\hosts";
     let backup = format!("{}\\hosts.backup", DATA_DIR);
@@ -130,36 +221,36 @@ pub fn rollback_changes() -> String {
     } else {
         results.push("No hosts backup found".to_string());
     }
-    
+
     // 2. Reset firewall to default
     let _ = std::process::Command::new("powershell")
         .args(["-NoProfile", "-Command", "Set-NetFirewallProfile -All -DefaultInboundAction Allow; Set-NetFirewallProfile -All -DefaultOutboundAction Allow"])
         .output();
     results.push("Firewall reset to default".to_string());
-    
+
     // 3. Remove proxy
     let _ = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-Command", 
+        .args(["-NoProfile", "-Command",
             "Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -Name ProxyServer -ErrorAction SilentlyContinue; Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -Name ProxyEnable -ErrorAction SilentlyContinue"])
         .output();
     results.push("Proxy removed".to_string());
-    
+
     // 4. Reset DNS to DHCP
     let _ = std::process::Command::new("netsh")
         .args(["interface", "ip", "set", "dns", "Wi-Fi", "dhcp"])
         .output();
     results.push("DNS reset to DHCP".to_string());
-    
+
     // 5. Enable Defender
     let _ = std::process::Command::new("powershell")
         .args(["-NoProfile", "-Command", "Set-MpPreference -DisableRealtimeMonitoring $false"])
         .output();
     results.push("Defender re-enabled".to_string());
-    
+
     // 6. Disable Ghost Mode if active
     if is_ghost_active() {
         let _ = std::process::Command::new("powershell")
-            .args(["-NoProfile", "-Command", 
+            .args(["-NoProfile", "-Command",
                 "Get-NetFirewallRule -DisplayName 'TS-VPN-Only' -ErrorAction SilentlyContinue | Remove-NetFirewallRule;",
                 "Get-NetFirewallRule -DisplayName 'TS-Block-ICMP' -ErrorAction SilentlyContinue | Remove-NetFirewallRule;",
                 "Get-NetFirewallRule -DisplayName 'TS-Block-Mal-Ports' -ErrorAction SilentlyContinue | Remove-NetFirewallRule;"])
@@ -169,7 +260,7 @@ pub fn rollback_changes() -> String {
         let _ = fs::remove_file(&ghost_flag);
         results.push("Ghost Mode disabled".to_string());
     }
-    
+
     results.join("; ")
 }
 
@@ -217,6 +308,17 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
         let request = String::from_utf8_lossy(&buffer[0..n]);
         let (method, path, headers) = parse_request(&request);
 
+        // CORS preflight check
+        if method == "OPTIONS" {
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\n{}Content-Length: 0\r\n\r\n",
+                cors_headers()
+            );
+            let _ = stream.write_all(resp.as_bytes());
+            let _ = stream.flush();
+            return;
+        }
+
         let response = match (method.as_str(), path.as_str()) {
             // ============================================
             // GET ENDPOINTS
@@ -228,11 +330,19 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                 let trust_state = get_trust_state();
                 let ghost = is_ghost_active();
                 let enabled = is_ts2_enabled();
+                let report = get_integrity_report();
+                let score = report.as_ref().map(|r| r.score).unwrap_or(0);
+                let state_str = report.as_ref().map(|r| format!("{:?}", r.state)).unwrap_or_else(|| "Unknown".to_string());
+                let trust_level = get_trust_level();
+                
                 json_response(200, &format!(
-                    r#"{{"status":"ok","trust_state":"{}","ghost":{},"enabled":{}}}"#,
+                    r#"{{"status":"ok","trust_state":"{}","ghost":{},"enabled":{},"integrity_score":{},"integrity_state":"{}","trust_level":{}}}"#,
                     trust_state,
                     ghost,
-                    enabled
+                    enabled,
+                    score,
+                    state_str,
+                    trust_level
                 ))
             }
             ("GET", "/dashboard") => {
@@ -242,16 +352,35 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                 let trust_state = get_trust_state();
                 let ghost = is_ghost_active();
                 let enabled = is_ts2_enabled();
+                let report = get_integrity_report();
+                let score = report.as_ref().map(|r| r.score).unwrap_or(0);
+                let trust_level = get_trust_level();
                 json_response(200, &format!(
-                    r#"{{"trust_state":"{}","ghost":{},"enabled":{}}}"#,
+                    r#"{{"trust_state":"{}","ghost":{},"enabled":{},"integrity_score":{},"trust_level":{}}}"#,
                     trust_state,
                     ghost,
-                    enabled
+                    enabled,
+                    score,
+                    trust_level
                 ))
+            }
+            ("GET", "/timeline") => {
+                let format = parse_query_param(&request, "format").unwrap_or_else(|| "json".to_string());
+                let data = crate::modules::timeline::export_timeline(&format);
+                json_response(200, &data)
+            }
+            ("GET", "/report") => {
+                let format = parse_query_param(&request, "format").unwrap_or_else(|| "json".to_string());
+                if let Some(report) = get_integrity_report() {
+                    let data = crate::modules::integrity::export_report(&report, &format);
+                    json_response(200, &data)
+                } else {
+                    json_response(404, r#"{"error":"No report available"}"#)
+                }
             }
 
             // ============================================
-            // POST ENDPOINTS
+            // POST ENDPOINTS (All require token)
             // ============================================
             ("POST", "/reset") => {
                 if !validate_auth(&headers, token) {
@@ -281,7 +410,7 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                     unauthorized()
                 } else {
                     let _ = std::process::Command::new("powershell")
-                        .args(["-NoProfile", "-Command", 
+                        .args(["-NoProfile", "-Command",
                             "Set-NetFirewallProfile -All -DefaultInboundAction Block;",
                             "Set-NetFirewallProfile -All -DefaultOutboundAction Block;"])
                         .output();
@@ -297,7 +426,7 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                     unauthorized()
                 } else {
                     let _ = std::process::Command::new("powershell")
-                        .args(["-NoProfile", "-Command", 
+                        .args(["-NoProfile", "-Command",
                             "Set-NetFirewallProfile -All -DefaultInboundAction Allow;",
                             "Set-NetFirewallProfile -All -DefaultOutboundAction Allow;"])
                         .output();
@@ -322,15 +451,12 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                     }
                 }
             }
-            // ============================================
-            // TS2 TOGGLE (ON/OFF)
-            // ============================================
             ("POST", "/enable") => {
                 if !validate_auth(&headers, token) {
                     unauthorized()
                 } else {
                     set_ts2_enabled(true);
-                    json_response(200, r#"{"status":"ok","message":"TS2 enabled"}"#)
+                    json_response(200, r#"{"status":"ok","message":"Invisibly enabled"}"#)
                 }
             }
             ("POST", "/disable") => {
@@ -338,12 +464,9 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                     unauthorized()
                 } else {
                     set_ts2_enabled(false);
-                    json_response(200, r#"{"status":"ok","message":"TS2 disabled (monitor mode only)"}"#)
+                    json_response(200, r#"{"status":"ok","message":"Invisibly disabled"}"#)
                 }
             }
-            // ============================================
-            // ROLLBACK
-            // ============================================
             ("POST", "/rollback") => {
                 if !validate_auth(&headers, token) {
                     unauthorized()
@@ -352,11 +475,17 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                     json_response(200, &format!(r#"{{"status":"ok","message":"{}"}}"#, result))
                 }
             }
-            // ============================================
-            // CORS
-            // ============================================
-            ("OPTIONS", _) => {
-                format!("HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization\r\nContent-Length: 0\r\n\r\n")
+            ("POST", "/verify_trust") => {
+                if !validate_auth(&headers, token) {
+                    unauthorized()
+                } else {
+                    crate::modules::trust::manual_verify();
+                    let trust_level = get_trust_level();
+                    json_response(200, &format!(
+                        r#"{{"status":"ok","trust_level":{}}}"#,
+                        trust_level
+                    ))
+                }
             }
             _ => {
                 json_response(404, r#"{"error":"Not found"}"#)
@@ -408,4 +537,3 @@ fn parse_home_ssid(request: &str) -> String {
     }
     String::new()
 }
-
