@@ -14,6 +14,9 @@ pub mod baseline;
 pub mod policy;
 pub mod trust;
 
+// Behavior-based detection
+pub mod behavior;
+
 // Tests
 #[cfg(test)]
 mod integrity_tests;

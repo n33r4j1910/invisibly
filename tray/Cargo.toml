@@ -8,5 +8,6 @@ authors = ["DeltaIQx LLP"]
 serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { workspace = true }
-tray-icon = { workspace = true }
-windows = { workspace = true }
+tray-icon = "0.19"
+winit = "0.30"
+windows = "0.58"

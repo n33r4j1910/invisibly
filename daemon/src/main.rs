@@ -1,6 +1,3 @@
-// Copyright (c) 2026 DeltaIQx LLP. All rights reserved.
-// This software is proprietary and confidential.
-
 use std::time::Duration;
 use std::fs;
 
@@ -15,6 +12,7 @@ use modules::timeline;
 use modules::baseline;
 use modules::policy;
 use modules::trust;
+use modules::behavior;
 
 const DATA_DIR: &str = "C:\\ProgramData\\Invisibly";
 
@@ -58,7 +56,10 @@ fn main() {
     // FIX: Compute initial report at startup
     // ============================================
     let current = detect::collect_state();
-    let issues = detect::diff(&baseline, &current);
+    let issues = behavior::detect_all_changes(&baseline, &current)
+        .into_iter()
+        .map(|(cat, details, _)| (cat, details))
+        .collect::<Vec<(String, String)>>();
     let is_baseline_valid = baseline::verify_baseline().valid;
     let is_lockdown = repair::is_ghost_active();
     let report = integrity::calculate(&issues, is_lockdown, is_baseline_valid);
@@ -103,9 +104,12 @@ fn main() {
         }
 
         // ============================================
-        // 3. DETECT CHANGES
+        // 3. DETECT CHANGES (Behavior-Based)
         // ============================================
-        let issues = detect::diff(&baseline, &current);
+        let issues = behavior::detect_all_changes(&baseline, &current)
+            .into_iter()
+            .map(|(cat, details, _)| (cat, details))
+            .collect::<Vec<(String, String)>>();
 
         // ============================================
         // 4. RISK ASSESSMENT & AUTO-REPAIR
@@ -162,8 +166,11 @@ fn main() {
         // ============================================
         let current_after_repair = detect::collect_state();
 
-        // Re-detect issues after repairs
-        let issues_after = detect::diff(&baseline, &current_after_repair);
+        // Re-detect issues after repairs (Behavior-Based)
+        let issues_after = behavior::detect_all_changes(&baseline, &current_after_repair)
+            .into_iter()
+            .map(|(cat, details, _)| (cat, details))
+            .collect::<Vec<(String, String)>>();
 
         // ============================================
         // 6. CALCULATE INTEGRITY SCORE FROM CURRENT STATE
