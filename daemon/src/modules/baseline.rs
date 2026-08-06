@@ -5,7 +5,7 @@
 //!
 //! Baseline is cryptographically signed with HMAC-SHA256.
 //! If tampered → system enters Invalid state.
-//! TPM binding is preferred, with HMAC fallback.
+//! Only the latest baseline version is considered valid (rollback protection).
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -15,6 +15,7 @@ const DATA_DIR: &str = "C:\\ProgramData\\Invisibly";
 const BASELINE_FILE: &str = "C:\\ProgramData\\Invisibly\\baseline.signed";
 const BASELINE_HASH_FILE: &str = "C:\\ProgramData\\Invisibly\\baseline.hash";
 const VERSIONS_DIR: &str = "C:\\ProgramData\\Invisibly\\baselines\\";
+const CURRENT_VERSION_FILE: &str = "C:\\ProgramData\\Invisibly\\current_version.txt";
 
 // ============================================
 // TYPES
@@ -74,7 +75,10 @@ pub fn create_baseline(state: &crate::detect::SystemState) -> Result<SignedBasel
     let hash = compute_baseline_hash(&baseline);
     fs::write(BASELINE_HASH_FILE, &hash).map_err(|e| e.to_string())?;
 
-    // Save version
+    // Save current version
+    fs::write(CURRENT_VERSION_FILE, &version.to_string()).map_err(|e| e.to_string())?;
+
+    // Save version history
     save_version(baseline.version, &hash);
 
     Ok(baseline)
@@ -93,7 +97,31 @@ pub fn verify_baseline() -> BaselineStatus {
     }
 
     let baseline = baseline.unwrap();
+
+    // === ROLLBACK PROTECTION: Check this is the latest version ===
+    let current_version = get_current_version();
+    if baseline.version != current_version {
+        return BaselineStatus {
+            exists: true,
+            valid: false,
+            version: baseline.version,
+            timestamp: baseline.timestamp,
+            state: format!("OUTDATED_VERSION (current: {})", current_version),
+        };
+    }
+
+    // Verify stored hash matches computed
     let stored_hash = fs::read_to_string(BASELINE_HASH_FILE).unwrap_or_default();
+    let computed_hash = compute_baseline_hash(&baseline);
+    if computed_hash != stored_hash {
+        return BaselineStatus {
+            exists: true,
+            valid: false,
+            version: baseline.version,
+            timestamp: baseline.timestamp,
+            state: "HASH_MISMATCH".to_string(),
+        };
+    }
 
     // Verify signature
     let state_hash = sign_baseline(&baseline.state, &baseline.previous_hash, baseline.version);
@@ -104,18 +132,6 @@ pub fn verify_baseline() -> BaselineStatus {
             version: baseline.version,
             timestamp: baseline.timestamp,
             state: "INVALID_SIGNATURE".to_string(),
-        };
-    }
-
-    // Verify stored hash matches computed
-    let computed_hash = compute_baseline_hash(&baseline);
-    if computed_hash != stored_hash {
-        return BaselineStatus {
-            exists: true,
-            valid: false,
-            version: baseline.version,
-            timestamp: baseline.timestamp,
-            state: "HASH_MISMATCH".to_string(),
         };
     }
 
@@ -175,6 +191,7 @@ pub fn restore_version(version: u64) -> Result<(), String> {
     // Save as current baseline
     fs::write(BASELINE_FILE, data).map_err(|e| e.to_string())?;
     fs::write(BASELINE_HASH_FILE, &target.unwrap().hash).map_err(|e| e.to_string())?;
+    fs::write(CURRENT_VERSION_FILE, &version.to_string()).map_err(|e| e.to_string())?;
 
     Ok(())
 }
@@ -192,9 +209,21 @@ fn load_baseline() -> Option<SignedBaseline> {
     serde_json::from_str(&data).ok()
 }
 
+fn get_current_version() -> u64 {
+    if let Ok(data) = fs::read_to_string(CURRENT_VERSION_FILE) {
+        if let Ok(v) = data.trim().parse::<u64>() {
+            return v;
+        }
+    }
+    // If no current version file, try to get from baseline
+    if let Some(baseline) = load_baseline() {
+        return baseline.version;
+    }
+    0
+}
+
 fn get_next_version() -> u64 {
-    let versions = get_versions();
-    versions.last().map(|v| v.version + 1).unwrap_or(1)
+    get_current_version() + 1
 }
 
 fn get_previous_hash() -> String {
@@ -206,7 +235,7 @@ fn sign_baseline(state: &str, prev_hash: &str, version: u64) -> String {
     use ring::hmac;
 
     // Use the encryption key as HMAC key
-    let key_data = crate::crypto::get_master_key();
+    let key_data = crate::crypto::get_hmac_key();
     let key = hmac::Key::new(hmac::HMAC_SHA256, &key_data);
 
     let data = format!("{}{}{}", prev_hash, version, state);

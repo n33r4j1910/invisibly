@@ -243,7 +243,7 @@ pub fn get_startup() -> Vec<String> {
 pub fn get_firewall() -> Vec<String> {
     let mut p = Vec::new();
     if let Ok(o) = Command::new("powershell")
-        .args(["-NoProfile","-Command","Get-NetFirewallProfile | ForEach-Object {$_.Name+':'+($_.Enabled ? 'ON':'OFF')}"])
+        .args(["-NoProfile","-Command","Get-NetFirewallProfile | ForEach-Object {$_.Name+':'+(if ($_.Enabled) { 'ON' } else { 'OFF' })}"])
         .output() {
         for l in String::from_utf8_lossy(&o.stdout).lines() {
             if !l.trim().is_empty() { p.push(l.trim().to_string()); }

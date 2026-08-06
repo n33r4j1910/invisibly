@@ -1,20 +1,31 @@
-#![windows_subsystem = "windows"]
+// #![windows_subsystem = "windows"]
 
 use std::time::Duration;
 use std::process;
 use std::sync::Arc;
-use tray_icon::{TrayIconBuilder, Icon, TrayIcon, TrayIconEvent};
+use tray_icon::{TrayIconBuilder, Icon, TrayIcon};
 use tray_icon::menu::{Menu, MenuItem, MenuEvent};
 use serde::Deserialize;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ControlFlow, EventLoop, ActiveEventLoop};
+use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
+use windows::Win32::System::Threading::CreateMutexW;
+use windows::core::w;
 
 #[derive(Debug, Deserialize)]
 struct DaemonStatus {
+    #[serde(default)]
+    status: Option<String>,
     trust_state: String,
     ghost: bool,
     enabled: bool,
+    #[serde(default)]
+    integrity_score: Option<u8>,
+    #[serde(default)]
+    integrity_state: Option<String>,
+    #[serde(default)]
+    trust_level: Option<u8>,
 }
 
 #[derive(Debug)]
@@ -63,6 +74,8 @@ impl ApplicationHandler<UserEvent> for TrayApp {
             return;
         }
 
+        println!("🔄 TrayApp::resumed() - Creating tray icon");
+
         let menu = Menu::new();
         let open_item = MenuItem::with_id("open_dashboard", "Open Dashboard", true, None);
         let quit_item = MenuItem::with_id("quit_app", "Quit", true, None);
@@ -76,6 +89,7 @@ impl ApplicationHandler<UserEvent> for TrayApp {
             .build()
             .unwrap();
 
+        println!("✅ Tray icon created");
         self.tray = Some(tray);
     }
 
@@ -90,6 +104,7 @@ impl ApplicationHandler<UserEvent> for TrayApp {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::MenuEvent(event) => {
+                println!("📋 MenuEvent: {:?}", event.id.as_ref());
                 match event.id.as_ref() {
                     "open_dashboard" => {
                         open_dashboard();
@@ -107,9 +122,11 @@ impl ApplicationHandler<UserEvent> for TrayApp {
                 }
             }
             UserEvent::StatusUpdate(status) => {
+                println!("🔄 StatusUpdate event received");
                 if let Some(tray) = &self.tray {
                     let (icon, tooltip) = match status {
                         Some(s) => {
+                            println!("📊 Status: trust_state={}, enabled={}", s.trust_state, s.enabled);
                             match s.trust_state.as_str() {
                                 "Trusted" => {
                                     if s.enabled {
@@ -124,10 +141,16 @@ impl ApplicationHandler<UserEvent> for TrayApp {
                                 _ => (self.icons.4.clone(), "⚪ Checking..."),
                             }
                         }
-                        None => (self.icons.4.clone(), "⚪ Daemon offline"),
+                        None => {
+                            println!("⚠️ No status received - daemon offline");
+                            (self.icons.4.clone(), "⚪ Daemon offline")
+                        }
                     };
+                    println!("🎨 Setting icon and tooltip");
                     let _ = tray.set_icon(Some(icon));
                     let _ = tray.set_tooltip(Some(tooltip));
+                } else {
+                    println!("⚠️ Tray is None, cannot update icon");
                 }
             }
         }
@@ -136,8 +159,28 @@ impl ApplicationHandler<UserEvent> for TrayApp {
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {}
 }
 
+fn check_single_instance() -> bool {
+    unsafe {
+        let handle = CreateMutexW(None, true, w!("Global\\InvisiblyTrayMutex"));
+        if handle.is_ok() {
+            let err = GetLastError();
+            if err.0 == ERROR_ALREADY_EXISTS.0 {
+                return false;
+            }
+            true
+        } else {
+            false
+        }
+    }
+}
+
 fn main() {
-    println!("🛡️ Invisibly Tray - Right-click for menu");
+    if !check_single_instance() {
+        println!("⚠️ Invisibly tray is already running!");
+        return;
+    }
+
+    println!("🛡️ Invisibly Tray - Starting...");
 
     let event_loop = EventLoop::with_user_event().build().unwrap();
 
@@ -157,14 +200,23 @@ fn main() {
     let proxy2 = event_loop.create_proxy();
     std::thread::spawn(move || {
         let client = reqwest::blocking::Client::new();
+        println!("🔄 Status polling thread started");
         loop {
-            match client.get(API_URL).timeout(Duration::from_secs(1)).send() {
+            match client.get(API_URL).timeout(Duration::from_secs(2)).send() {
                 Ok(resp) => {
-                    if let Ok(status) = resp.json::<DaemonStatus>() {
-                        let _ = proxy2.send_event(UserEvent::StatusUpdate(Some(status)));
+                    match resp.json::<DaemonStatus>() {
+                        Ok(status) => {
+                            println!("📊 Daemon status: {}", status.trust_state);
+                            let _ = proxy2.send_event(UserEvent::StatusUpdate(Some(status)));
+                        }
+                        Err(e) => {
+                            println!("⚠️ JSON parse error: {}", e);
+                            let _ = proxy2.send_event(UserEvent::StatusUpdate(None));
+                        }
                     }
                 }
-                Err(_) => {
+                Err(e) => {
+                    println!("❌ Daemon offline: {}", e);
                     let _ = proxy2.send_event(UserEvent::StatusUpdate(None));
                 }
             }
@@ -178,5 +230,8 @@ fn main() {
         proxy: event_loop.create_proxy(),
     };
 
-    let _ = event_loop.run_app(&mut app);
+    println!("🚀 Running event loop...");
+    if let Err(e) = event_loop.run_app(&mut app) {
+        println!("❌ Event loop error: {}", e);
+    }
 }

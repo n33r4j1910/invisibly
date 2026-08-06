@@ -15,337 +15,33 @@ use chrono::Local;
 const DATA_DIR: &str = "C:\\ProgramData\\Invisibly";
 
 // ============================================
-// AUTOMATIC REPAIRS (No user input)
+// HELPER: Run command and log success/failure
 // ============================================
 
-pub fn reset_dns() {
-    let _ = Command::new("netsh").args(["interface", "ip", "set", "dns", "Wi-Fi", "dhcp"]).output();
-    log_repair("DNS", "Reset to DHCP");
-    log_incident("DNS", "Reset", "DNS reset to DHCP");
-}
-
-pub fn restore_hosts() {
-    let hosts = "C:\\Windows\\System32\\drivers\\etc\\hosts";
-    let backup = format!("{}\\hosts.backup", DATA_DIR);
-    if Path::new(&backup).exists() {
-        let _ = fs::copy(&backup, hosts);
-        log_repair("Hosts", "Restored from backup");
-        log_incident("Hosts", "Restored", "Hosts file restored from backup");
-    }
-}
-
-pub fn enable_firewall() {
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command", "Set-NetFirewallProfile -All -Enabled True"])
-        .output();
-    log_repair("Firewall", "Re-enabled all profiles");
-    log_incident("Firewall", "Re-enabled", "Firewall re-enabled");
-}
-
-pub fn remove_proxy() {
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            "Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -Name ProxyServer -ErrorAction SilentlyContinue; Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -Name ProxyEnable -ErrorAction SilentlyContinue; Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -Name ProxyEnable -Value 0"])
-        .output();
-    log_repair("Proxy", "Removed proxy settings");
-    log_incident("Proxy", "Removed", "Proxy settings removed");
-}
-
-pub fn enable_defender() {
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command", "Set-MpPreference -DisableRealtimeMonitoring $false"])
-        .output();
-    log_repair("Defender", "Re-enabled realtime protection");
-    log_incident("Defender", "Re-enabled", "Windows Defender re-enabled");
-}
-
-pub fn enable_uac() {
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' -Name EnableLUA -Value 1"])
-        .output();
-    log_repair("UAC", "Re-enabled");
-    log_incident("UAC", "Re-enabled", "UAC re-enabled");
-}
-
-pub fn enable_windows_update() {
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            "Set-Service -Name wuauserv -StartupType Automatic -Status Running"])
-        .output();
-    log_repair("WindowsUpdate", "Re-enabled");
-    log_incident("WindowsUpdate", "Re-enabled", "Windows Update re-enabled");
-}
-
-pub fn enable_system_restore() {
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            "Enable-ComputerRestore -Drive 'C:\\'"])
-        .output();
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            "Set-Service -Name srservice -StartupType Automatic -Status Running"])
-        .output();
-    log_repair("SystemRestore", "Re-enabled");
-    log_incident("SystemRestore", "Re-enabled", "System Restore re-enabled");
-}
-
-pub fn enable_smart_screen() {
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer' -Name SmartScreenEnabled -Value 'RequireAdmin'"])
-        .output();
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            "Set-MpPreference -EnableSmartScreen $true"])
-        .output();
-    log_repair("SmartScreen", "Re-enabled");
-    log_incident("SmartScreen", "Re-enabled", "SmartScreen re-enabled");
-}
-
-pub fn enable_ipv6() {
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            "Enable-NetAdapterBinding -Name '*' -ComponentID ms_tcpip6"])
-        .output();
-    log_repair("IPv6", "Re-enabled");
-    log_incident("IPv6", "Re-enabled", "IPv6 re-enabled");
-}
-
-pub fn set_wifi_private() {
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            "Set-NetConnectionProfile -NetworkCategory Private"])
-        .output();
-    log_repair("WiFiProfile", "Set to Private");
-    log_incident("WiFiProfile", "Changed", "WiFi profile set to Private");
-}
-
-pub fn block_ip(ip: &str) {
-    let _ = Command::new("netsh")
-        .args(["advfirewall", "firewall", "add", "rule",
-               "name=TS-Block-IP", "dir=in", "action=block",
-               &format!("remoteip={}", ip)])
-        .output();
-    log_repair("BlockIP", &format!("Blocked IP: {}", ip));
-    log_incident("BlockIP", "Blocked", &format!("IP blocked: {}", ip));
-}
-
-pub fn network_kill() {
-    let _ = Command::new("netsh").args(["advfirewall", "set", "allprofiles", "state", "on"]).output();
-    log_repair("NetworkKill", "All firewall profiles enabled");
-    log_incident("NetworkKill", "Enabled", "Network kill - all firewall profiles enabled");
-}
-
-pub fn block_bruteforce_ips() {
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            "Get-WinEvent -FilterHashtable @{LogName='Security'; ID=4625} -MaxEvents 50 -ErrorAction SilentlyContinue | ForEach-Object { $_.Properties[19].Value } | Where-Object {$_ -match '\\d+\\.\\d+\\.\\d+\\.\\d+'} | Group-Object | Where-Object {$_.Count -gt 5} | Select-Object -ExpandProperty Name | ForEach-Object { New-NetFirewallRule -DisplayName 'TS-Block-Brute-' + $_ -Direction Inbound -RemoteAddress $_ -Action Block }"])
-        .output();
-    log_repair("BruteForce", "Blocked brute force IPs");
-    log_incident("BruteForce", "Blocked", "Brute force IPs blocked");
-}
-
-// ============================================
-// CONFIRM REQUIRED / QUARANTINE REPAIRS
-// ============================================
-
-pub fn quarantine_startup() {
-    let startup = format!("{}\\Microsoft\\Windows\\Start Menu\\Programs\\Startup",
-        std::env::var("APPDATA").unwrap_or_default());
-    if let Ok(entries) = fs::read_dir(&startup) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file() {
-                let name = path.file_name().unwrap().to_string_lossy();
-                let quar = format!("{}\\quarantine\\{}", DATA_DIR, name);
-                let _ = fs::create_dir_all(format!("{}\\quarantine", DATA_DIR));
-                let _ = fs::rename(&path, &quar);
-                log_repair("Startup", &format!("Quarantined: {}", name));
-                log_incident("Startup", "Quarantined", &format!("Startup entry quarantined: {}", name));
+fn run_command(cmd: &mut Command, action: &str, details: &str) -> bool {
+    match cmd.output() {
+        Ok(output) => {
+            if output.status.success() {
+                log_repair(action, &format!("✅ {}", details));
+                log_incident(action, "Success", &format!("{}", details));
+                true
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                log_repair(action, &format!("❌ Failed: {} - {}", details, stderr));
+                log_incident(action, "Failed", &format!("{} - {}", details, stderr));
+                false
             }
+        }
+        Err(e) => {
+            log_repair(action, &format!("❌ Error: {} - {}", details, e));
+            log_incident(action, "Error", &format!("{} - {}", details, e));
+            false
         }
     }
 }
 
-pub fn delete_fake_files() {
-    // QUARANTINE instead of delete for safety
-    let dirs = ["Desktop", "Downloads"];
-    for dir in &dirs {
-        let path = format!("{}\\{}", std::env::var("USERPROFILE").unwrap_or_default(), dir);
-        if let Ok(entries) = fs::read_dir(&path) {
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().to_lowercase();
-                if name.ends_with(".pdf.exe") || name.ends_with(".doc.exe") ||
-                   name.ends_with(".jpg.exe") || name.ends_with(".txt.exe") ||
-                   name.contains(".exe.") {
-                    let quar = format!("{}\\quarantine\\{}", DATA_DIR, name);
-                    let _ = fs::create_dir_all(format!("{}\\quarantine", DATA_DIR));
-                    let _ = fs::rename(entry.path(), &quar);
-                    log_repair("FakeFiles", &format!("Quarantined: {}", name));
-                    log_incident("FakeFiles", "Quarantined", &format!("Fake file quarantined: {}", name));
-                }
-            }
-        }
-    }
-}
-
-pub fn eject_usb(device: &str) {
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            &format!("Get-PnpDevice -FriendlyName '{}' | Disable-PnpDevice -Confirm:$false", device)])
-        .output();
-    log_repair("USB", &format!("Ejected: {}", device));
-    log_incident("USB", "Ejected", &format!("USB device ejected: {}", device));
-}
-
-pub fn disable_bt_devices() {
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            "Get-PnpDevice -Class Bluetooth | Where-Object {$_.Status -eq 'OK' -and $_.FriendlyName -notmatch 'Intel|Qualcomm|Realtek|Broadcom|MediaTek|Microsoft'} | Disable-PnpDevice -Confirm:$false -ErrorAction SilentlyContinue"])
-        .output();
-    log_repair("Bluetooth", "Disabled unknown BT devices");
-    log_incident("Bluetooth", "Disabled", "Unknown Bluetooth devices disabled");
-}
-
-pub fn disable_hid_devices() {
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            "Get-PnpDevice -Class Keyboard,Mouse | Where-Object {$_.Status -eq 'OK' -and $_.FriendlyName -notmatch 'Microsoft|Logitech|Razer|Dell|HP|Lenovo|Synaptics|Intel'} | Disable-PnpDevice -Confirm:$false -ErrorAction SilentlyContinue"])
-        .output();
-    log_repair("HID", "Disabled unknown HID devices");
-    log_incident("HID", "Disabled", "Unknown HID devices disabled");
-}
-
-pub fn disable_unknown_adapters() {
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            "Get-NetAdapter | Where-Object {$_.Name -notmatch 'Wi-Fi|Ethernet|Bluetooth|vEthernet|Loopback'} | Disable-NetAdapter -Confirm:$false -ErrorAction SilentlyContinue"])
-        .output();
-    log_repair("Adapter", "Disabled unknown adapters");
-    log_incident("Adapter", "Disabled", "Unknown network adapters disabled");
-}
-
-pub fn clean_unicode_bidi() {
-    let hosts = "C:\\Windows\\System32\\drivers\\etc\\hosts";
-    if let Ok(content) = fs::read_to_string(hosts) {
-        let cleaned: String = content.chars()
-            .filter(|c| !['\u{202E}', '\u{202D}', '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}',
-                         '\u{200B}', '\u{200C}', '\u{200D}', '\u{200E}', '\u{200F}', '\u{FEFF}',
-                         '\u{202A}', '\u{202B}', '\u{202C}', '\u{00AD}'].contains(c))
-            .collect();
-        let _ = fs::write(hosts, cleaned);
-        log_repair("Bidi", "Cleaned Unicode bidi characters");
-        log_incident("Bidi", "Cleaned", "Unicode bidi characters cleaned from hosts");
-    }
-}
-
 // ============================================
-// ALERT ONLY REPAIRS
-// ============================================
-
-pub fn alert_bloatware() {
-    log_repair("Bloatware", "Bloatware/PUP detected");
-    log_incident("Bloatware", "Detected", "Bloatware/PUP detected");
-}
-
-pub fn alert_suspicious_process() {
-    log_repair("SuspiciousProcess", "Suspicious process detected from Temp/Downloads");
-    log_incident("SuspiciousProcess", "Detected", "Suspicious process detected");
-}
-
-pub fn alert_new_device() {
-    log_repair("NewDevice", "New network device detected");
-    log_incident("NewDevice", "Detected", "New network device detected");
-}
-
-pub fn alert_secure_boot() {
-    log_repair("SecureBoot", "Secure Boot is OFF");
-    log_incident("SecureBoot", "Alert", "Secure Boot is OFF");
-}
-
-pub fn alert_service_change() {
-    log_repair("ServiceChange", "Windows Service changed");
-    log_incident("ServiceChange", "Alert", "Windows Service changed");
-}
-
-pub fn alert_event_log_cleared() {
-    log_repair("EventLog", "Alert - Event log was cleared");
-    log_incident("EventLog", "Alert", "Event log was cleared - investigation recommended");
-}
-
-pub fn alert_vpn_disconnected() {
-    log_repair("VPN", "Alert - VPN disconnected");
-    log_incident("VPN", "Alert", "VPN disconnected - check your connection");
-}
-
-pub fn alert_doh_changed() {
-    log_repair("DoH", "Alert - DNS over HTTPS changed");
-    log_incident("DoH", "Alert", "DNS over HTTPS setting changed");
-}
-
-pub fn alert_laps_changed() {
-    log_repair("LAPS", "Alert - LAPS status changed");
-    log_incident("LAPS", "Alert", "LAPS status changed");
-}
-
-// ============================================
-// GHOST MODE
-// ============================================
-
-pub fn ghost_mode_on() {
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            "Get-NetFirewallRule -DisplayName 'TS-VPN-Only' -ErrorAction SilentlyContinue | Remove-NetFirewallRule;",
-            "Get-NetFirewallRule -DisplayName 'TS-Block-ICMP' -ErrorAction SilentlyContinue | Remove-NetFirewallRule;",
-            "Get-NetFirewallRule -DisplayName 'TS-Block-Mal-Ports' -ErrorAction SilentlyContinue | Remove-NetFirewallRule;"])
-        .output();
-
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            "Set-NetFirewallProfile -All -DefaultInboundAction Block;",
-            "Set-NetFirewallProfile -All -DefaultOutboundAction Block;",
-            "New-NetFirewallRule -DisplayName 'TS-VPN-Only' -Direction Outbound -RemotePort 443,1194,51820 -Protocol TCP,UDP -Action Allow;",
-            "New-NetFirewallRule -DisplayName 'TS-Block-ICMP' -Direction Inbound -Protocol ICMPv4 -Action Block;",
-            "New-NetFirewallRule -DisplayName 'TS-Block-Mal-Ports' -Direction Inbound -LocalPort 4444,5555,6667,8080,8888,31337,3389,5900,5800,5938,21,23,25,110,143,993,995,3306,5432,1433,1521,27017,6379,11211,5000,4500,5060 -Action Block;",
-            "Get-NetFirewallRule -DisplayGroup 'Network Discovery' | Disable-NetFirewallRule;",
-            "Get-NetFirewallRule -DisplayGroup 'File and Printer Sharing' | Disable-NetFirewallRule;",
-            "Stop-Service -Name 'FDResPub','SSDPSRV','upnphost','bthserv' -Force;",
-            "Set-Service -Name 'FDResPub','SSDPSRV','upnphost','bthserv' -StartupType Disabled;"])
-        .output();
-
-    log_repair("GhostMode", "Enabled - Full lockdown active");
-    log_incident("GhostMode", "Enabled", "Ghost Mode enabled - Full lockdown");
-}
-
-pub fn ghost_mode_off() {
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            "Get-NetFirewallRule -DisplayName 'TS-VPN-Only' -ErrorAction SilentlyContinue | Remove-NetFirewallRule;",
-            "Get-NetFirewallRule -DisplayName 'TS-Block-ICMP' -ErrorAction SilentlyContinue | Remove-NetFirewallRule;",
-            "Get-NetFirewallRule -DisplayName 'TS-Block-Mal-Ports' -ErrorAction SilentlyContinue | Remove-NetFirewallRule;"])
-        .output();
-
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-Command",
-            "Set-NetFirewallProfile -All -DefaultInboundAction Allow;",
-            "Set-NetFirewallProfile -All -DefaultOutboundAction Allow;",
-            "Get-NetFirewallRule -DisplayGroup 'Network Discovery' | Enable-NetFirewallRule;",
-            "Get-NetFirewallRule -DisplayGroup 'File and Printer Sharing' | Enable-NetFirewallRule;",
-            "Set-Service -Name 'FDResPub','SSDPSRV','upnphost','bthserv' -StartupType Manual;"])
-        .output();
-
-    log_repair("GhostMode", "Disabled - Normal operation restored");
-    log_incident("GhostMode", "Disabled", "Ghost Mode disabled - Normal operation");
-}
-
-pub fn is_ghost_active() -> bool {
-    let ghost_flag = format!("{}\\ghost.flag", DATA_DIR);
-    Path::new(&ghost_flag).exists()
-}
-
-// ============================================
-// UTILITIES
+// APPEND MODE FOR LOGGING
 // ============================================
 
 fn log_repair(action: &str, details: &str) {
@@ -355,16 +51,23 @@ fn log_repair(action: &str, details: &str) {
         action,
         details
     );
-    let _ = fs::write(&log_path, entry);
+    let _ = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .and_then(|mut f| {
+            use std::io::Write;
+            f.write_all(entry.as_bytes())
+        });
 }
 
 fn log_incident(category: &str, action: &str, details: &str) {
     let user_dir = format!("{}\\Invisibly\\incidents", std::env::var("USERPROFILE").unwrap_or_default());
     let _ = fs::create_dir_all(&user_dir);
-    
+
     let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S");
     let filename = format!("{}\\{}_{}_{}.txt", user_dir, timestamp, category, action);
-    
+
     let content = format!(
         "========================================\n\
          INVISIBLY INCIDENT REPORT\n\
@@ -383,6 +86,328 @@ fn log_incident(category: &str, action: &str, details: &str) {
         action,
         details
     );
-    
+
     let _ = fs::write(&filename, content);
+}
+
+// ============================================
+// AUTOMATIC REPAIRS (No user input)
+// ============================================
+
+pub fn reset_dns() {
+    let mut cmd = Command::new("netsh");
+    cmd.args(["interface", "ip", "set", "dns", "Wi-Fi", "dhcp"]);
+    run_command(&mut cmd, "DNS", "Reset to DHCP");
+}
+
+pub fn restore_hosts() {
+    let hosts = "C:\\Windows\\System32\\drivers\\etc\\hosts";
+    let backup = format!("{}\\hosts.backup", DATA_DIR);
+    if Path::new(&backup).exists() {
+        match fs::copy(&backup, hosts) {
+            Ok(_) => {
+                log_repair("Hosts", "✅ Restored from backup");
+                log_incident("Hosts", "Success", "Hosts file restored from backup");
+            }
+            Err(e) => {
+                log_repair("Hosts", &format!("❌ Failed: {}", e));
+                log_incident("Hosts", "Failed", &format!("Hosts restore failed: {}", e));
+            }
+        }
+    } else {
+        log_repair("Hosts", "⚠️ No backup found");
+    }
+}
+
+pub fn enable_firewall() {
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-Command", "Set-NetFirewallProfile -All -Enabled True"]);
+    run_command(&mut cmd, "Firewall", "Re-enabled all profiles");
+}
+
+pub fn remove_proxy() {
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-Command",
+        "Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -Name ProxyServer -ErrorAction SilentlyContinue; Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -Name ProxyEnable -ErrorAction SilentlyContinue; Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -Name ProxyEnable -Value 0"]);
+    run_command(&mut cmd, "Proxy", "Removed proxy settings");
+}
+
+pub fn enable_defender() {
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-Command", "Set-MpPreference -DisableRealtimeMonitoring $false"]);
+    run_command(&mut cmd, "Defender", "Re-enabled realtime protection");
+}
+
+pub fn enable_uac() {
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-Command",
+        "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' -Name EnableLUA -Value 1"]);
+    run_command(&mut cmd, "UAC", "Re-enabled");
+}
+
+pub fn enable_windows_update() {
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-Command",
+        "Set-Service -Name wuauserv -StartupType Automatic -Status Running"]);
+    run_command(&mut cmd, "WindowsUpdate", "Re-enabled");
+}
+
+pub fn enable_system_restore() {
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-Command",
+        "Enable-ComputerRestore -Drive 'C:\\'"]);
+    run_command(&mut cmd, "SystemRestore", "Re-enabled");
+    
+    let mut cmd2 = Command::new("powershell");
+    cmd2.args(["-NoProfile", "-Command",
+        "Set-Service -Name srservice -StartupType Automatic -Status Running"]);
+    run_command(&mut cmd2, "SystemRestore", "Service started");
+}
+
+pub fn enable_smart_screen() {
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-Command",
+        "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer' -Name SmartScreenEnabled -Value 'RequireAdmin'"]);
+    run_command(&mut cmd, "SmartScreen", "Re-enabled");
+    
+    let mut cmd2 = Command::new("powershell");
+    cmd2.args(["-NoProfile", "-Command",
+        "Set-MpPreference -EnableSmartScreen $true"]);
+    run_command(&mut cmd2, "SmartScreen", "MP preference updated");
+}
+
+pub fn enable_ipv6() {
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-Command",
+        "Enable-NetAdapterBinding -Name '*' -ComponentID ms_tcpip6"]);
+    run_command(&mut cmd, "IPv6", "Re-enabled");
+}
+
+pub fn set_wifi_private() {
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-Command",
+        "Set-NetConnectionProfile -NetworkCategory Private"]);
+    run_command(&mut cmd, "WiFiProfile", "Set to Private");
+}
+
+pub fn block_ip(ip: &str) {
+    let mut cmd = Command::new("netsh");
+    cmd.args(["advfirewall", "firewall", "add", "rule",
+               "name=TS-Block-IP", "dir=in", "action=block",
+               &format!("remoteip={}", ip)]);
+    run_command(&mut cmd, "BlockIP", &format!("Blocked IP: {}", ip));
+}
+
+pub fn network_kill() {
+    let mut cmd = Command::new("netsh");
+    cmd.args(["advfirewall", "set", "allprofiles", "state", "on"]);
+    run_command(&mut cmd, "NetworkKill", "All firewall profiles enabled");
+}
+
+pub fn block_bruteforce_ips() {
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-Command",
+        "Get-WinEvent -FilterHashtable @{LogName='Security'; ID=4625} -MaxEvents 50 -ErrorAction SilentlyContinue | ForEach-Object { $_.Properties[19].Value } | Where-Object {$_ -match '\\d+\\.\\d+\\.\\d+\\.\\d+'} | Group-Object | Where-Object {$_.Count -gt 5} | Select-Object -ExpandProperty Name | ForEach-Object { New-NetFirewallRule -DisplayName 'TS-Block-Brute-' + $_ -Direction Inbound -RemoteAddress $_ -Action Block }"]);
+    run_command(&mut cmd, "BruteForce", "Blocked brute force IPs");
+}
+
+// ============================================
+// CONFIRM REQUIRED / QUARANTINE REPAIRS
+// ============================================
+
+pub fn quarantine_startup() {
+    let startup = format!("{}\\Microsoft\\Windows\\Start Menu\\Programs\\Startup",
+        std::env::var("APPDATA").unwrap_or_default());
+    if let Ok(entries) = fs::read_dir(&startup) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                let name = path.file_name().unwrap().to_string_lossy();
+                let quar = format!("{}\\quarantine\\{}", DATA_DIR, name);
+                let _ = fs::create_dir_all(format!("{}\\quarantine", DATA_DIR));
+                match fs::rename(&path, &quar) {
+                    Ok(_) => {
+                        log_repair("Startup", &format!("✅ Quarantined: {}", name));
+                        log_incident("Startup", "Quarantined", &format!("Startup entry quarantined: {}", name));
+                    }
+                    Err(e) => {
+                        log_repair("Startup", &format!("❌ Failed to quarantine {}: {}", name, e));
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub fn delete_fake_files() {
+    let dirs = ["Desktop", "Downloads"];
+    for dir in &dirs {
+        let path = format!("{}\\{}", std::env::var("USERPROFILE").unwrap_or_default(), dir);
+        if let Ok(entries) = fs::read_dir(&path) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_lowercase();
+                if name.ends_with(".pdf.exe") || name.ends_with(".doc.exe") ||
+                   name.ends_with(".jpg.exe") || name.ends_with(".txt.exe") ||
+                   name.contains(".exe.") {
+                    let quar = format!("{}\\quarantine\\{}", DATA_DIR, name);
+                    let _ = fs::create_dir_all(format!("{}\\quarantine", DATA_DIR));
+                    match fs::rename(entry.path(), &quar) {
+                        Ok(_) => {
+                            log_repair("FakeFiles", &format!("✅ Quarantined: {}", name));
+                            log_incident("FakeFiles", "Quarantined", &format!("Fake file quarantined: {}", name));
+                        }
+                        Err(e) => {
+                            log_repair("FakeFiles", &format!("❌ Failed to quarantine {}: {}", name, e));
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub fn eject_usb(device: &str) {
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-Command",
+        &format!("Get-PnpDevice -FriendlyName '{}' | Disable-PnpDevice -Confirm:$false", device)]);
+    run_command(&mut cmd, "USB", &format!("Ejected: {}", device));
+}
+
+pub fn disable_bt_devices() {
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-Command",
+        "Get-PnpDevice -Class Bluetooth | Where-Object {$_.Status -eq 'OK' -and $_.FriendlyName -notmatch 'Intel|Qualcomm|Realtek|Broadcom|MediaTek|Microsoft'} | Disable-PnpDevice -Confirm:$false -ErrorAction SilentlyContinue"]);
+    run_command(&mut cmd, "Bluetooth", "Disabled unknown BT devices");
+}
+
+pub fn disable_hid_devices() {
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-Command",
+        "Get-PnpDevice -Class Keyboard,Mouse | Where-Object {$_.Status -eq 'OK' -and $_.FriendlyName -notmatch 'Microsoft|Logitech|Razer|Dell|HP|Lenovo|Synaptics|Intel'} | Disable-PnpDevice -Confirm:$false -ErrorAction SilentlyContinue"]);
+    run_command(&mut cmd, "HID", "Disabled unknown HID devices");
+}
+
+pub fn disable_unknown_adapters() {
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-Command",
+        "Get-NetAdapter | Where-Object {$_.Name -notmatch 'Wi-Fi|Ethernet|Bluetooth|vEthernet|Loopback'} | Disable-NetAdapter -Confirm:$false -ErrorAction SilentlyContinue"]);
+    run_command(&mut cmd, "Adapter", "Disabled unknown adapters");
+}
+
+pub fn clean_unicode_bidi() {
+    let hosts = "C:\\Windows\\System32\\drivers\\etc\\hosts";
+    if let Ok(content) = fs::read_to_string(hosts) {
+        let cleaned: String = content.chars()
+            .filter(|c| !['\u{202E}', '\u{202D}', '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}',
+                         '\u{200B}', '\u{200C}', '\u{200D}', '\u{200E}', '\u{200F}', '\u{FEFF}',
+                         '\u{202A}', '\u{202B}', '\u{202C}', '\u{00AD}'].contains(c))
+            .collect();
+        match fs::write(hosts, cleaned) {
+            Ok(_) => {
+                log_repair("Bidi", "✅ Cleaned Unicode bidi characters");
+                log_incident("Bidi", "Cleaned", "Unicode bidi characters cleaned from hosts");
+            }
+            Err(e) => {
+                log_repair("Bidi", &format!("❌ Failed: {}", e));
+            }
+        }
+    }
+}
+
+// ============================================
+// ALERT ONLY REPAIRS
+// ============================================
+
+pub fn alert_bloatware() {
+    log_repair("Bloatware", "⚠️ Bloatware/PUP detected");
+    log_incident("Bloatware", "Detected", "Bloatware/PUP detected");
+}
+
+pub fn alert_suspicious_process() {
+    log_repair("SuspiciousProcess", "⚠️ Suspicious process detected from Temp/Downloads");
+    log_incident("SuspiciousProcess", "Detected", "Suspicious process detected");
+}
+
+pub fn alert_new_device() {
+    log_repair("NewDevice", "⚠️ New network device detected");
+    log_incident("NewDevice", "Detected", "New network device detected");
+}
+
+pub fn alert_secure_boot() {
+    log_repair("SecureBoot", "⚠️ Secure Boot is OFF");
+    log_incident("SecureBoot", "Alert", "Secure Boot is OFF");
+}
+
+pub fn alert_service_change() {
+    log_repair("ServiceChange", "⚠️ Windows Service changed");
+    log_incident("ServiceChange", "Alert", "Windows Service changed");
+}
+
+pub fn alert_event_log_cleared() {
+    log_repair("EventLog", "⚠️ Event log was cleared");
+    log_incident("EventLog", "Alert", "Event log was cleared - investigation recommended");
+}
+
+pub fn alert_vpn_disconnected() {
+    log_repair("VPN", "⚠️ VPN disconnected");
+    log_incident("VPN", "Alert", "VPN disconnected - check your connection");
+}
+
+pub fn alert_doh_changed() {
+    log_repair("DoH", "⚠️ DNS over HTTPS changed");
+    log_incident("DoH", "Alert", "DNS over HTTPS setting changed");
+}
+
+pub fn alert_laps_changed() {
+    log_repair("LAPS", "⚠️ LAPS status changed");
+    log_incident("LAPS", "Alert", "LAPS status changed");
+}
+
+// ============================================
+// GHOST MODE
+// ============================================
+
+pub fn ghost_mode_on() {
+    let mut cmd1 = Command::new("powershell");
+    cmd1.args(["-NoProfile", "-Command",
+        "Get-NetFirewallRule -DisplayName 'TS-VPN-Only' -ErrorAction SilentlyContinue | Remove-NetFirewallRule;",
+        "Get-NetFirewallRule -DisplayName 'TS-Block-ICMP' -ErrorAction SilentlyContinue | Remove-NetFirewallRule;",
+        "Get-NetFirewallRule -DisplayName 'TS-Block-Mal-Ports' -ErrorAction SilentlyContinue | Remove-NetFirewallRule;"]);
+    run_command(&mut cmd1, "GhostMode", "Cleaned existing rules");
+
+    let mut cmd2 = Command::new("powershell");
+    cmd2.args(["-NoProfile", "-Command",
+        "Set-NetFirewallProfile -All -DefaultInboundAction Block;",
+        "Set-NetFirewallProfile -All -DefaultOutboundAction Block;",
+        "New-NetFirewallRule -DisplayName 'TS-VPN-Only' -Direction Outbound -RemotePort 443,1194,51820 -Protocol TCP,UDP -Action Allow;",
+        "New-NetFirewallRule -DisplayName 'TS-Block-ICMP' -Direction Inbound -Protocol ICMPv4 -Action Block;",
+        "New-NetFirewallRule -DisplayName 'TS-Block-Mal-Ports' -Direction Inbound -LocalPort 4444,5555,6667,8080,8888,31337,3389,5900,5800,5938,21,23,25,110,143,993,995,3306,5432,1433,1521,27017,6379,11211,5000,4500,5060 -Action Block;",
+        "Get-NetFirewallRule -DisplayGroup 'Network Discovery' | Disable-NetFirewallRule;",
+        "Get-NetFirewallRule -DisplayGroup 'File and Printer Sharing' | Disable-NetFirewallRule;",
+        "Stop-Service -Name 'FDResPub','SSDPSRV','upnphost','bthserv' -Force;",
+        "Set-Service -Name 'FDResPub','SSDPSRV','upnphost','bthserv' -StartupType Disabled;"]);
+    run_command(&mut cmd2, "GhostMode", "Enabled - Full lockdown active");
+}
+
+pub fn ghost_mode_off() {
+    let mut cmd1 = Command::new("powershell");
+    cmd1.args(["-NoProfile", "-Command",
+        "Get-NetFirewallRule -DisplayName 'TS-VPN-Only' -ErrorAction SilentlyContinue | Remove-NetFirewallRule;",
+        "Get-NetFirewallRule -DisplayName 'TS-Block-ICMP' -ErrorAction SilentlyContinue | Remove-NetFirewallRule;",
+        "Get-NetFirewallRule -DisplayName 'TS-Block-Mal-Ports' -ErrorAction SilentlyContinue | Remove-NetFirewallRule;"]);
+    run_command(&mut cmd1, "GhostMode", "Removed existing rules");
+
+    let mut cmd2 = Command::new("powershell");
+    cmd2.args(["-NoProfile", "-Command",
+        "Set-NetFirewallProfile -All -DefaultInboundAction Allow;",
+        "Set-NetFirewallProfile -All -DefaultOutboundAction Allow;",
+        "Get-NetFirewallRule -DisplayGroup 'Network Discovery' | Enable-NetFirewallRule;",
+        "Get-NetFirewallRule -DisplayGroup 'File and Printer Sharing' | Enable-NetFirewallRule;",
+        "Set-Service -Name 'FDResPub','SSDPSRV','upnphost','bthserv' -StartupType Manual;"]);
+    run_command(&mut cmd2, "GhostMode", "Disabled - Normal operation restored");
+}
+
+pub fn is_ghost_active() -> bool {
+    let ghost_flag = format!("{}\\ghost.flag", DATA_DIR);
+    Path::new(&ghost_flag).exists()
 }

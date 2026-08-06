@@ -52,28 +52,43 @@ fn main() {
     let baseline = load_or_create_baseline();
     let home_ssid = config::load_home_ssid().unwrap_or_else(|| "Unknown".into());
 
-    // ============================================
+        // ============================================
     // FIX: Compute initial report at startup
     // ============================================
+    println!("🔍 [1/6] Collecting state...");
     let current = detect::collect_state();
+    println!("✅ [1/6] State collected");
+
+    println!("🔍 [2/6] Detecting changes...");
     let issues = behavior::detect_all_changes(&baseline, &current)
         .into_iter()
         .map(|(cat, details, _)| (cat, details))
         .collect::<Vec<(String, String)>>();
+    println!("✅ [2/6] Changes detected: {}", issues.len());
+
+    println!("🔍 [3/6] Verifying baseline...");
     let is_baseline_valid = baseline::verify_baseline().valid;
+    println!("✅ [3/6] Baseline valid: {}", is_baseline_valid);
+
+    println!("🔍 [4/6] Checking lockdown...");
     let is_lockdown = repair::is_ghost_active();
+    println!("✅ [4/6] Lockdown: {}", is_lockdown);
+
+    println!("🔍 [5/6] Calculating integrity...");
     let report = integrity::calculate(&issues, is_lockdown, is_baseline_valid);
     server::set_integrity_report(report.clone());
     server::set_trust_level(trust::get_trust_score());
-    println!("📊 Initial Integrity Score: {} | Trust Level: {}", report.score, server::get_trust_level());
+    println!("📊 [5/6] Initial Integrity Score: {} | Trust Level: {}", report.score, server::get_trust_level());
     println!("");
 
-    // Start API server
-    std::thread::spawn(|| {
-        if let Err(e) = server::run() {
-            eprintln!("API server error: {}", e);
-        }
-    });
+    println!("🔍 [6/6] Starting API server...");
+    // Start API server synchronously to catch errors
+    println!("🔌 Starting API server on port 12790...");
+    if let Err(e) = server::run() {
+        eprintln!("❌ API server error: {}", e);
+        eprintln!("❌ Daemon cannot start without API server.");
+        std::process::exit(1);
+    }
 
     std::thread::sleep(Duration::from_secs(2));
 

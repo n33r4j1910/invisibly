@@ -1,4 +1,7 @@
-// Copyright (c) 2026 DeltaIQx LLP. All rights reserved.`n// This software is proprietary and confidential.`n//! Configuration Module - Monitor-Only
+// Copyright (c) 2026 DeltaIQx LLP. All rights reserved.
+// This software is proprietary and confidential.
+
+//! Configuration Module - Monitor-Only
 use std::fs;
 use std::path::Path;
 
@@ -29,6 +32,15 @@ pub fn ensure_data_dir() -> std::io::Result<()> {
     fs::create_dir_all(format!("{}\\quarantine", DATA_DIR))?;
     fs::create_dir_all(format!("{}\\canary", DATA_DIR))?;
     fs::create_dir_all(format!("{}\\backups", DATA_DIR))?;
+    
+    // === ACL HARDENING: Restrict access to SYSTEM and Administrators ===
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("icacls")
+            .args([DATA_DIR, "/inheritance:r", "/grant", "SYSTEM:F", "/grant", "Administrators:F", "/remove", "Users", "/remove", "Everyone"])
+            .status();
+    }
+    
     Ok(())
 }
 
@@ -44,7 +56,15 @@ pub struct ConsentRecord {
 pub fn log_consent(record: &ConsentRecord) {
     let path = format!("{}\\consent.log", DATA_DIR);
     let entry = serde_json::to_string(record).unwrap_or_default();
-    let _ = fs::write(&path, entry + "\n");
+    // FIXED: Use append mode instead of overwrite
+    let _ = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .and_then(|mut f| {
+            use std::io::Write;
+            f.write_all((entry + "\n").as_bytes())
+        });
 }
 
 pub fn get_consent_history() -> Vec<ConsentRecord> {
@@ -143,4 +163,3 @@ pub fn cleanup_uninstall() -> bool {
         false
     }
 }
-

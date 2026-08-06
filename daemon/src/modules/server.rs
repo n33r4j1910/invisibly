@@ -116,7 +116,7 @@ pub fn get_trust_level() -> u8 {
 }
 
 // ============================================
-// TOKEN — Injected server-side, not exposed via API
+// TOKEN — Exposed only on localhost
 // ============================================
 
 fn get_token() -> String {
@@ -148,7 +148,7 @@ fn cors_headers() -> String {
 }
 
 // ============================================
-// HTTP HELPERS
+// HTTP HELPERS — FIXED: No extra \r\n after cors_headers()
 // ============================================
 
 fn json_response(status: u16, body: &str) -> String {
@@ -174,7 +174,7 @@ fn status_string(code: u16) -> &'static str {
 
 fn html_response(body: &str) -> String {
     format!(
-        "HTTP/1.1 200 OK\r\n{}Content-Type: text/html\r\nContent-Length: {}\r\n\r\n{}",
+        "HTTP/1.1 200 OK\r\n{}Content-Type: text/html\r\nCache-Control: no-cache, no-store, must-revalidate\r\nPragma: no-cache\r\nExpires: 0\r\nContent-Length: {}\r\n\r\n{}",
         cors_headers(),
         body.len(),
         body
@@ -269,9 +269,10 @@ pub fn rollback_changes() -> String {
 // ============================================
 
 pub fn run() -> std::io::Result<()> {
+    println!("🔌 Server: Attempting to bind to {}:{}", BIND_ADDR, PORT);
     let addr = format!("{}:{}", BIND_ADDR, PORT);
     let listener = TcpListener::bind(&addr)?;
-
+    println!("✅ Server: Successfully bound to port {}", PORT);
     println!("📡 API running on http://{}", addr);
 
     let token = get_token();
@@ -308,7 +309,7 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
         let request = String::from_utf8_lossy(&buffer[0..n]);
         let (method, path, headers) = parse_request(&request);
 
-        // CORS preflight check
+        // CORS preflight check — FIXED: No extra \r\n
         if method == "OPTIONS" {
             let resp = format!(
                 "HTTP/1.1 200 OK\r\n{}Content-Length: 0\r\n\r\n",
@@ -334,7 +335,7 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                 let score = report.as_ref().map(|r| r.score).unwrap_or(0);
                 let state_str = report.as_ref().map(|r| format!("{:?}", r.state)).unwrap_or_else(|| "Unknown".to_string());
                 let trust_level = get_trust_level();
-                
+
                 json_response(200, &format!(
                     r#"{{"status":"ok","trust_state":"{}","ghost":{},"enabled":{},"integrity_score":{},"integrity_state":"{}","trust_level":{}}}"#,
                     trust_state,
@@ -445,7 +446,7 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                     if !ssid.is_empty() {
                         let home_path = format!("{}\\home.ssid", DATA_DIR);
                         let _ = fs::write(&home_path, &ssid);
-                        json_response(200, &format!(r#"{{"status":"ok","ssid":"{}"}}"#, ssid))
+                        json_response(200, &format!(r#"{{"status":"ok","ssid":"{}"}}"#, json_escape(&ssid)))
                     } else {
                         json_response(400, r#"{"error":"Invalid SSID"}"#)
                     }
@@ -472,7 +473,7 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                     unauthorized()
                 } else {
                     let result = rollback_changes();
-                    json_response(200, &format!(r#"{{"status":"ok","message":"{}"}}"#, result))
+                    json_response(200, &format!(r#"{{"status":"ok","message":"{}"}}"#, json_escape(&result)))
                 }
             }
             ("POST", "/verify_trust") => {
@@ -495,6 +496,25 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
         let _ = stream.write_all(response.as_bytes());
         let _ = stream.flush();
     }
+}
+
+// ============================================
+// JSON ESCAPE HELPER
+// ============================================
+
+fn json_escape(s: &str) -> String {
+    let mut escaped = String::new();
+    for c in s.chars() {
+        match c {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            _ => escaped.push(c),
+        }
+    }
+    escaped
 }
 
 // ============================================

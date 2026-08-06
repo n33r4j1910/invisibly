@@ -3,8 +3,10 @@
 
 //! Cryptography module — Minimal but functional
 //!
-//! get_master_key() is used for HMAC signing of the baseline.
-//! encrypt/decrypt functions are used for baseline.json persistence.
+//! get_master_key() returns the base seed.
+//! Different keys are derived from the seed for different purposes:
+//! - HMAC key: used for baseline signing
+//! - XOR key: used for baseline encryption (obfuscation)
 
 use ring::rand::{SecureRandom, SystemRandom};
 use std::fs;
@@ -14,7 +16,7 @@ const DATA_DIR: &str = "C:\\ProgramData\\Invisibly";
 const MASTER_KEY_LEN: usize = 32;
 
 // ============================================
-// MASTER KEY
+// MASTER KEY (Base Seed)
 // ============================================
 
 pub fn get_master_key() -> [u8; MASTER_KEY_LEN] {
@@ -39,7 +41,33 @@ pub fn get_master_key() -> [u8; MASTER_KEY_LEN] {
 }
 
 // ============================================
-// ENCRYPT / DECRYPT (XOR-based, used for baseline)
+// KEY DERIVATION — Separate keys for different purposes
+// ============================================
+
+/// Derive a key for HMAC signing
+pub fn get_hmac_key() -> [u8; MASTER_KEY_LEN] {
+    let base = get_master_key();
+    use ring::digest::{digest, SHA256};
+    let mut result = [0u8; MASTER_KEY_LEN];
+    let data = [base.as_ref(), b"hmac-key"].concat();
+    let hash = digest(&SHA256, &data);
+    result.copy_from_slice(hash.as_ref());
+    result
+}
+
+/// Derive a key for XOR encryption (obfuscation)
+pub fn get_xor_key() -> [u8; MASTER_KEY_LEN] {
+    let base = get_master_key();
+    use ring::digest::{digest, SHA256};
+    let mut result = [0u8; MASTER_KEY_LEN];
+    let data = [base.as_ref(), b"xor-key"].concat();
+    let hash = digest(&SHA256, &data);
+    result.copy_from_slice(hash.as_ref());
+    result
+}
+
+// ============================================
+// ENCRYPT / DECRYPT (XOR-based, used for baseline obfuscation)
 // ============================================
 
 pub fn encrypt_data(data: &[u8], key: &[u8; MASTER_KEY_LEN]) -> Vec<u8> {
@@ -59,34 +87,34 @@ pub fn decrypt_data(encrypted: &[u8], key: &[u8; MASTER_KEY_LEN]) -> Result<Vec<
 }
 
 pub fn encrypt_baseline(data: &str) -> Vec<u8> {
-    let key = get_master_key();
+    let key = get_xor_key();
     encrypt_data(data.as_bytes(), &key)
 }
 
 pub fn decrypt_baseline(encrypted: &[u8]) -> Result<String, String> {
-    let key = get_master_key();
+    let key = get_xor_key();
     let decrypted = decrypt_data(encrypted, &key)?;
     String::from_utf8(decrypted).map_err(|_| "Invalid UTF-8".to_string())
 }
 
 pub fn encrypt_consent(data: &str) -> Vec<u8> {
-    let key = get_master_key();
+    let key = get_xor_key();
     encrypt_data(data.as_bytes(), &key)
 }
 
 pub fn decrypt_consent(encrypted: &[u8]) -> Result<String, String> {
-    let key = get_master_key();
+    let key = get_xor_key();
     let decrypted = decrypt_data(encrypted, &key)?;
     String::from_utf8(decrypted).map_err(|_| "Invalid UTF-8".to_string())
 }
 
 pub fn encrypt_event(data: &str) -> Vec<u8> {
-    let key = get_master_key();
+    let key = get_xor_key();
     encrypt_data(data.as_bytes(), &key)
 }
 
 pub fn decrypt_event(encrypted: &[u8]) -> Result<String, String> {
-    let key = get_master_key();
+    let key = get_xor_key();
     let decrypted = decrypt_data(encrypted, &key)?;
     String::from_utf8(decrypted).map_err(|_| "Invalid UTF-8".to_string())
 }
