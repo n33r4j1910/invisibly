@@ -338,17 +338,17 @@ Auto-enables on public networks:
 
 **\*\*Core Protection\*\*** 				
 
-&#x20;Malware Scanning 	 	 ✅ 	 ❌ 	 ✅ 	 ❌ 
+&#x20;Malware Scanning 	 	 	 ✅ 	 ❌ 	 ✅ 	 ❌ 
 
-&#x20;Virus Signature Updates 	 ✅ 	 ❌ 	 ✅ 	 ❌ 
+&#x20;Virus Signature Updates 	 	 ✅ 	 ❌ 	 ✅ 	 ❌ 
 
-&#x20;File Quarantine 	 	 ✅ 	 ❌ 	 ✅ 	 ❌ 
+&#x20;File Quarantine 	 	 	 ✅ 	 ❌ 	 ✅ 	 ❌ 
 
 &#x20;**\*\*Configuration Integrity\*\*** 				
 
 &#x20;Endpoint Integrity Monitoring 	 ❌ 	 ❌ 	 ⚠️ 	 ✅ 
 
-&#x20;Integrity Score 	 	 ❌ 	 ❌ 	 ⚠️ 	 ✅ 
+&#x20;Integrity Score 	 	 	 ❌ 	 ❌ 	 ⚠️ 	 ✅ 
 
 &#x20;Automatic Security Repair 	 ❌ 	 ❌ 	 ⚠️ 	 ✅ 
 
@@ -356,13 +356,13 @@ Auto-enables on public networks:
 
 &#x20;**\*\*Network Protection\*\*** 				
 
-&#x20;DNS Monitoring 	 	 ❌ 	 ❌ 	 ⚠️ 	 ✅ 
+&#x20;DNS Monitoring 	 	 	 ❌ 	 ❌ 	 ⚠️ 	 ✅ 
 
 &#x20;Hosts File Monitoring 	 	 ❌ 	 ❌ 	 ⚠️ 	 ✅ 
 
-&#x20;Proxy Monitoring 	 	 ❌ 	 ❌ 	 ⚠️ 	 ✅ 
+&#x20;Proxy Monitoring 	 	 	 ❌ 	 ❌ 	 ⚠️ 	 ✅ 
 
-&#x20;ARP Spoofing Detection 	 ❌ 	 ❌ 	 ❌ 	 ✅ 
+&#x20;ARP Spoofing Detection 	 	 ❌ 	 ❌ 	 ❌ 	 ✅ 
 
 &#x20;Port Scan Detection 	 	 ❌ 	 ⚠️ 	 ⚠️ 	 ✅ 
 
@@ -374,21 +374,21 @@ Auto-enables on public networks:
 
 &#x20;Windows Defender Monitoring 	 ❌ 	 ❌ 	 ⚠️ 	 ✅ 
 
-&#x20;UAC Monitoring 	 	 ❌ 	 ❌ 	 ❌ 	 ✅ 
+&#x20;UAC Monitoring 	 	 	 ❌ 	 ❌ 	 ❌ 	 ✅ 
 
 &#x20;Windows Update Monitoring 	 ❌ 	 ❌ 	 ❌ 	 ✅ 
 
 &#x20;System Restore Monitoring 	 ❌ 	 ❌ 	 ❌ 	 ✅ 
 
-&#x20;SmartScreen Monitoring 	 ❌ 	 ❌ 	 ❌ 	 ✅ 
+&#x20;SmartScreen Monitoring 	 	 ❌ 	 ❌ 	 ❌ 	 ✅ 
 
-&#x20;Secure Boot Monitoring 	 ❌ 	 ❌ 	 ⚠️ 	 ✅ 
+&#x20;Secure Boot Monitoring 	 	 ❌ 	 ❌ 	 ⚠️ 	 ✅ 
 
-&#x20;LAPS Monitoring 	 	 ❌ 	 ❌ 	 ❌ 	 ✅ 
+&#x20;LAPS Monitoring 	 	 	 ❌ 	 ❌ 	 ❌ 	 ✅ 
 
 &#x20;**\*\*Persistence Monitoring\*\*** 				
 
-&#x20;Startup Entry Monitoring 	 ❌ 	 ❌ 	 ⚠️ 	 ✅ 
+&#x20;Startup Entry Monitoring 	 	 ❌ 	 ❌ 	 ⚠️ 	 ✅ 
 
 &#x20;Scheduled Task Monitoring 	 ❌ 	 ❌ 	 ⚠️ 	 ✅ 
 
@@ -396,7 +396,7 @@ Auto-enables on public networks:
 
 &#x20;**\*\*Hardware Protection\*\*** 				
 
-&#x20;USB Storage Monitoring 	 ❌ 	 ❌ 	 ⚠️ 	 ✅ 
+&#x20;USB Storage Monitoring 	 	 ❌ 	 ❌ 	 ⚠️ 	 ✅ 
 
 &#x20;HID Device Monitoring 	 	 ❌ 	 ❌ 	 ⚠️ 	 ✅ 
 
@@ -408,15 +408,15 @@ Auto-enables on public networks:
 
 &#x20;Homoglyph Domain Detection 	 ❌ 	 ❌ 	 ❌ 	 ✅ 
 
-&#x20;Zero-width Character Detection  ❌ 	 ❌ 	 ❌ 	 ✅ 
+&#x20;Zero-width Character Detection     ❌ 	 ❌ 	 ❌ 	 ✅ 
 
-&#x20;Unicode Bidi Detection 	 ❌ 	 ❌ 	 ❌ 	 ✅ 
+&#x20;Unicode Bidi Detection 		 ❌ 	 ❌ 	 ❌ 	 ✅ 
 
 &#x20;Ransomware Canary Monitoring 	 ⚠️ 	 ❌ 	 ⚠️ 	 ✅ 
 
 &#x20;**\*\*Privacy \& Performance\*\*** 				
 
-&#x20;Fully Offline Operation 	 ⚠️ 	 ✅ 	 ❌ 	 ✅ 
+&#x20;Fully Offline Operation 	 	 ⚠️ 	 ✅ 	 ❌ 	 ✅ 
 
 &#x20;No Cloud Dependency 	 	 ❌ 	 ✅ 	 ❌ 	 ✅ 
 
@@ -552,29 +552,9 @@ Invisibly is clean. The security detections are from engines flagging legitimate
 
 
 
-endpoint integrity, configuration monitoring, DNS hijacking, ARP spoofing, 
+## Keywords
 
-hosts file protection, firewall monitoring, defender monitoring, UAC protection, 
-
-Windows Update monitoring, System Restore protection, SmartScreen monitoring, 
-
-USB security, Bluetooth security, HID protection, BadUSB prevention, 
-
-phishing domains, homoglyph detection, zero-width attacks, Unicode bidi attacks, 
-
-ransomware canary, brute force detection, port scan detection, proxy monitoring, 
-
-scheduled tasks monitoring, startup persistence, Windows Services monitoring, 
-
-Ghost Mode, public WiFi protection, stealth mode, integrity score, trust level, 
-
-security baseline, auto-repair, configuration drift detection, offline security, 
-
-no telemetry, privacy-first, lightweight, Windows security, Rust, 
-
-autonomous endpoint protection
-
-
+endpoint integrity, configuration monitoring, behavior-based detection, DNS hijacking, ARP spoofing, hosts file protection, firewall monitoring, defender monitoring, UAC protection, Windows Update monitoring, System Restore protection, SmartScreen monitoring, USB security, Bluetooth security, HID protection, BadUSB prevention, phishing domains, homoglyph detection, zero-width attacks, Unicode bidi attacks, ransomware canary, brute force detection, port scan detection, proxy monitoring, scheduled tasks monitoring, startup persistence, Windows Services monitoring, Ghost Mode, public WiFi protection, stealth mode, integrity score, trust level, security baseline, auto-repair, configuration drift detection, offline security, no telemetry, privacy-first, lightweight, Windows security, Rust, autonomous endpoint protection, token masking, security timeline
 
 **## License**
 
