@@ -179,7 +179,9 @@ async function fetchToken() {
         const resp = await fetch(TOKEN_API);
         const data = await resp.json();
         token = data.token || '';
-        document.getElementById('token-value').textContent = token || '❌ No token';
+        // Mask token for display (show first 8 chars only)
+        const maskedToken = token ? token.substring(0, 8) + '...' : '❌ No token';
+        document.getElementById('token-value').textContent = maskedToken;
     } catch {
         document.getElementById('token-value').textContent = '❌ Daemon offline';
     }
@@ -205,7 +207,7 @@ function render(data) {
         scoreEl.className = 'score-ring animate';
         lastScore = score;
     }
-    
+
     let scoreClass = 'high';
     let scoreText = '✅ System healthy';
     if (score < 70) { scoreClass = 'low'; scoreText = '🔴 Action required'; }
@@ -271,7 +273,7 @@ async function fetchTimeline() {
         if (!resp.ok) return;
         const data = await resp.json();
         const entries = data.entries || [];
-        
+
         if (entries.length === 0) {
             document.getElementById('events-list').innerHTML = '<p style="color:#4a5a73;font-size:14px;">No events yet</p>';
             return;
@@ -285,7 +287,7 @@ async function fetchTimeline() {
             const time = e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : '';
             return `<div class="event ${cls} highlight"><span class="desc">${desc}</span><span class="time">${time}</span></div>`;
         }).join('');
-        
+
         document.getElementById('events-list').innerHTML = eventsHtml;
         document.getElementById('event-count').textContent = entries.length;
     } catch (error) {

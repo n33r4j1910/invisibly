@@ -529,7 +529,9 @@ fn parse_request(request: &str) -> (String, String, String) {
 
     let parts: Vec<&str> = lines[0].split_whitespace().collect();
     let method = parts.get(0).unwrap_or(&"GET").to_string();
-    let path = parts.get(1).unwrap_or(&"/").to_string();
+    let full_path = parts.get(1).unwrap_or(&"/").to_string();
+    // Extract path without query string
+    let path = full_path.split('?').next().unwrap_or("/").to_string();
 
     let auth = lines.iter()
         .find(|l| l.starts_with("Authorization:"))
