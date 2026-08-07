@@ -20,7 +20,7 @@ const MASTER_KEY_LEN: usize = 32;
 // ============================================
 
 pub fn get_master_key() -> [u8; MASTER_KEY_LEN] {
-    let key_path = format!("{}\\tpm_seed.enc", DATA_DIR);
+    let key_path = format!("{}\\master_seed.enc", DATA_DIR); 
 
     if let Ok(data) = fs::read(&key_path) {
         if data.len() == MASTER_KEY_LEN {
