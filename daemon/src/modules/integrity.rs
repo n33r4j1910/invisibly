@@ -353,6 +353,42 @@ pub fn calculate(
         total_deduction += deduction as u16;
     }
 
+    // ============================================
+    // NEW: 4 ADDITIONAL CONTROL EVALUATORS
+    // ============================================
+
+    // 19. DHCP Server
+    let dhcp_status = get_dhcp_status(issues);
+    control_status.insert("dhcp".to_string(), dhcp_status.clone());
+    if dhcp_status.status != Status::Healthy {
+        let deduction = apply_deduction(&mut deductions, "dhcp", &dhcp_status, &weights, &context);
+        total_deduction += deduction as u16;
+    }
+
+    // 20. BitLocker
+    let bitlocker_status = get_bitlocker_status(issues);
+    control_status.insert("bitlocker".to_string(), bitlocker_status.clone());
+    if bitlocker_status.status != Status::Healthy {
+        let deduction = apply_deduction(&mut deductions, "bitlocker", &bitlocker_status, &weights, &context);
+        total_deduction += deduction as u16;
+    }
+
+    // 21. Credential Guard
+    let credguard_status = get_credential_guard_status(issues);
+    control_status.insert("credguard".to_string(), credguard_status.clone());
+    if credguard_status.status != Status::Healthy {
+        let deduction = apply_deduction(&mut deductions, "credguard", &credguard_status, &weights, &context);
+        total_deduction += deduction as u16;
+    }
+
+    // 22. RDP
+    let rdp_status = get_rdp_status(issues);
+    control_status.insert("rdp".to_string(), rdp_status.clone());
+    if rdp_status.status != Status::Healthy {
+        let deduction = apply_deduction(&mut deductions, "rdp", &rdp_status, &weights, &context);
+        total_deduction += deduction as u16;
+    }
+
     // Cap deduction at 100
     let final_score = if total_deduction >= 100 {
         0
@@ -712,6 +748,86 @@ fn get_devices_status(issues: &[(String, String)]) -> ControlStatus {
     ControlStatus {
         status: Status::Healthy,
         reason: "No unknown network devices".to_string(),
+        severity: Severity::None,
+        weight: 0,
+    }
+}
+
+// ============================================
+// NEW: 4 ADDITIONAL CONTROL EVALUATORS
+// ============================================
+
+fn get_dhcp_status(issues: &[(String, String)]) -> ControlStatus {
+    for (category, _) in issues {
+        if category == "dhcp" {
+            return ControlStatus {
+                status: Status::Warning,
+                reason: "DHCP server changed (possible spoofing)".to_string(),
+                severity: Severity::High,
+                weight: 12,
+            };
+        }
+    }
+    ControlStatus {
+        status: Status::Healthy,
+        reason: "DHCP server is consistent".to_string(),
+        severity: Severity::None,
+        weight: 0,
+    }
+}
+
+fn get_bitlocker_status(issues: &[(String, String)]) -> ControlStatus {
+    for (category, msg) in issues {
+        if category == "bitlocker" && msg.contains("OFF") {
+            return ControlStatus {
+                status: Status::Compromised,
+                reason: "BitLocker is disabled".to_string(),
+                severity: Severity::High,
+                weight: 12,
+            };
+        }
+    }
+    ControlStatus {
+        status: Status::Healthy,
+        reason: "BitLocker is enabled".to_string(),
+        severity: Severity::None,
+        weight: 0,
+    }
+}
+
+fn get_credential_guard_status(issues: &[(String, String)]) -> ControlStatus {
+    for (category, msg) in issues {
+        if category == "credguard" && msg.contains("OFF") {
+            return ControlStatus {
+                status: Status::Compromised,
+                reason: "Credential Guard is disabled".to_string(),
+                severity: Severity::High,
+                weight: 12,
+            };
+        }
+    }
+    ControlStatus {
+        status: Status::Healthy,
+        reason: "Credential Guard is enabled".to_string(),
+        severity: Severity::None,
+        weight: 0,
+    }
+}
+
+fn get_rdp_status(issues: &[(String, String)]) -> ControlStatus {
+    for (category, msg) in issues {
+        if category == "rdp" && (msg.contains("LISTENING") || msg.contains("RUNNING")) {
+            return ControlStatus {
+                status: Status::Warning,
+                reason: "RDP is enabled (port 3389 listening)".to_string(),
+                severity: Severity::Medium,
+                weight: 6,
+            };
+        }
+    }
+    ControlStatus {
+        status: Status::Healthy,
+        reason: "RDP is disabled".to_string(),
         severity: Severity::None,
         weight: 0,
     }

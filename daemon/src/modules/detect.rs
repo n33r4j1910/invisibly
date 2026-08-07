@@ -56,6 +56,12 @@ pub struct SystemState {
     pub wifi_profile_status: String,
     pub doh_status: String,
     pub laps_status: String,
+
+    // NEW: 4 Additional detections
+    pub dhcp_server: String,
+    pub bitlocker_status: String,
+    pub credential_guard_status: String,
+    pub rdp_status: String,
 }
 
 // ============================================
@@ -92,7 +98,6 @@ pub fn collect_state() -> SystemState {
 
         homoglyph_domains: get_homoglyph_domains(),
 
-        // NEW: 10 Integrity signals
         uac_status: get_uac_status(),
         windows_update_status: get_windows_update_status(),
         system_restore_status: get_system_restore_status(),
@@ -103,6 +108,12 @@ pub fn collect_state() -> SystemState {
         wifi_profile_status: get_wifi_profile_status(),
         doh_status: get_doh_status(),
         laps_status: get_laps_status(),
+
+        // NEW: 4 Additional detections
+        dhcp_server: get_dhcp_server(),
+        bitlocker_status: get_bitlocker_status(),
+        credential_guard_status: get_credential_guard_status(),
+        rdp_status: get_rdp_status(),
     }
 }
 
@@ -622,6 +633,99 @@ pub fn get_laps_status() -> String {
 }
 
 // ============================================
+// NEW: 4 ADDITIONAL DETECTIONS
+// ============================================
+
+/// Detects DHCP spoofing by checking the DHCP server IP
+pub fn get_dhcp_server() -> String {
+    if let Ok(o) = Command::new("powershell")
+        .args(["-NoProfile", "-Command", "Get-NetIPConfiguration | Where-Object {$_.InterfaceAlias -like '*Wi*' -or $_.InterfaceAlias -like '*Wireless*'} | Select-Object -ExpandProperty DhcpServer"])
+        .output() {
+        let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+        if !s.is_empty() && s != "0.0.0.0" {
+            return s;
+        }
+    }
+    // Fallback: check DHCP server via ipconfig
+    if let Ok(o) = Command::new("ipconfig")
+        .args(["/all"])
+        .output() {
+        for l in String::from_utf8_lossy(&o.stdout).lines() {
+            if l.contains("DHCP Server") {
+                if let Some(ip) = l.split(':').nth(1) {
+                    let ip = ip.trim().to_string();
+                    if !ip.is_empty() && ip != "0.0.0.0" {
+                        return ip;
+                    }
+                }
+            }
+        }
+    }
+    "Unknown".into()
+}
+
+/// Checks if BitLocker is enabled on the system drive
+pub fn get_bitlocker_status() -> String {
+    if let Ok(o) = Command::new("powershell")
+        .args(["-NoProfile", "-Command", "Get-BitLockerVolume -MountPoint 'C:' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ProtectionStatus"])
+        .output() {
+        let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+        if s == "On" { return "ON".to_string(); }
+        if s == "Off" { return "OFF".to_string(); }
+    }
+    // Fallback: check registry
+    if let Ok(o) = Command::new("powershell")
+        .args(["-NoProfile", "-Command", "(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\BitLocker\\Status\\C:' -ErrorAction SilentlyContinue).EncryptionStatus"])
+        .output() {
+        let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+        if s == "1" { return "ON".to_string(); }
+        if s == "0" { return "OFF".to_string(); }
+    }
+    "Unknown".into()
+}
+
+/// Checks if Credential Guard is enabled
+pub fn get_credential_guard_status() -> String {
+    if let Ok(o) = Command::new("powershell")
+        .args(["-NoProfile", "-Command", "(Get-ComputerInfo).DeviceGuardCredentialGuardStatus"])
+        .output() {
+        let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+        if s == "Running" { return "ON".to_string(); }
+        if s == "Off" { return "OFF".to_string(); }
+    }
+    // Fallback: check registry
+    if let Ok(o) = Command::new("powershell")
+        .args(["-NoProfile", "-Command", "(Get-ItemProperty 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\DeviceGuard' -ErrorAction SilentlyContinue).EnableVirtualizationBasedSecurity"])
+        .output() {
+        let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+        if s == "1" { return "ON".to_string(); }
+        if s == "0" { return "OFF".to_string(); }
+    }
+    "Unknown".into()
+}
+
+/// Checks if RDP (port 3389) is listening
+pub fn get_rdp_status() -> String {
+    if let Ok(o) = Command::new("netstat")
+        .args(["-ano", "-p", "TCP"])
+        .output() {
+        for l in String::from_utf8_lossy(&o.stdout).lines() {
+            if l.contains("3389") && l.contains("LISTENING") {
+                return "LISTENING".to_string();
+            }
+        }
+    }
+    // Also check if RDP service is running
+    if let Ok(o) = Command::new("powershell")
+        .args(["-NoProfile", "-Command", "Get-Service -Name TermService -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Status"])
+        .output() {
+        let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+        if s == "Running" { return "RUNNING".to_string(); }
+    }
+    "OFF".into()
+}
+
+// ============================================
 // THREAT DETECTION FUNCTIONS
 // ============================================
 
@@ -677,7 +781,7 @@ pub fn check_usb() -> String {
 }
 
 // ============================================
-// DIFF FUNCTION
+// DIFF FUNCTION — UPDATED WITH 4 NEW FIELDS
 // ============================================
 
 pub fn diff(a: &SystemState, b: &SystemState) -> Vec<(String, String)> {
@@ -733,7 +837,7 @@ pub fn diff(a: &SystemState, b: &SystemState) -> Vec<(String, String)> {
         d.push(("homoglyph".into(), "Homoglyph domain detected".into()));
     }
 
-    // NEW: 10 Integrity signals
+    // 10 Integrity signals
     if a.uac_status != b.uac_status {
         d.push(("uac".into(), format!("UAC: {}", b.uac_status)));
     }
@@ -763,6 +867,20 @@ pub fn diff(a: &SystemState, b: &SystemState) -> Vec<(String, String)> {
     }
     if a.laps_status != b.laps_status {
         d.push(("laps".into(), format!("LAPS: {}", b.laps_status)));
+    }
+
+    // NEW: 4 Additional detections
+    if a.dhcp_server != b.dhcp_server {
+        d.push(("dhcp".into(), format!("DHCP Server: {}", b.dhcp_server)));
+    }
+    if a.bitlocker_status != b.bitlocker_status {
+        d.push(("bitlocker".into(), format!("BitLocker: {}", b.bitlocker_status)));
+    }
+    if a.credential_guard_status != b.credential_guard_status {
+        d.push(("credguard".into(), format!("Credential Guard: {}", b.credential_guard_status)));
+    }
+    if a.rdp_status != b.rdp_status {
+        d.push(("rdp".into(), format!("RDP: {}", b.rdp_status)));
     }
 
     d

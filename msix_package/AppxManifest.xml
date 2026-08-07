@@ -1,24 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
-<Package xmlns="http://schemas.microsoft.com/appx/2010/manifest"
-         xmlns:rescap="http://schemas.microsoft.com/appx/2014/11/manifest">
-    <Identity Name="Invisibly"
-              Publisher="CN=Invisibly"
-              Version="1.0.0.0"/>
-    <Properties>
-        <DisplayName>Invisibly</DisplayName>
-        <Description>Lightweight autonomous endpoint security agent</Description>
-        <PublisherDisplayName>Invisibly</PublisherDisplayName>
-        <Logo>assets\logo.png</Logo>
-    </Properties>
-    <Resources>
-        <Resource Language="en-US"/>
-    </Resources>
-    <Capabilities>
-        <rescap:Capability Name="runFullTrust"/>
-    </Capabilities>
-    <Applications>
-        <Application Id="Invisibly"
-                     Executable="invisibly-daemon.exe"
-                     EntryPoint="Windows.FullTrustApplication"/>
-    </Applications>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+         xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest"
+         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+         IgnorableNamespaces="uap mp rescap">
+    <Identity Name="DeltaIQx.Invisibly" Publisher="CN=DeltaIQx" Version="2.0.0.0" />
+  <Properties>
+    <DisplayName>Invisibly</DisplayName>
+    <PublisherDisplayName>DeltaIQx LLP</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+    <Description>Autonomous endpoint security agent. Detects 38 threats, auto-repairs 26. 100% offline. No cloud. No telemetry.</Description>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.22621.0" />
+  </Dependencies>
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+  <Applications>
+    <Application Id="App" Executable="invisibly-daemon.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements DisplayName="Invisibly" Description="Autonomous endpoint security agent"
+           Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png"
+           BackgroundColor="transparent">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
+      </uap:VisualElements>
+    </Application>
+  </Applications>
 </Package>

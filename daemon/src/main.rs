@@ -52,7 +52,7 @@ fn main() {
     let baseline = load_or_create_baseline();
     let home_ssid = config::load_home_ssid().unwrap_or_else(|| "Unknown".into());
 
-        // ============================================
+    // ============================================
     // FIX: Compute initial report at startup
     // ============================================
     println!("🔍 [1/6] Collecting state...");
@@ -147,11 +147,16 @@ fn main() {
                     "smartscreen" => repair::enable_smart_screen(),
                     "ipv6" => repair::enable_ipv6(),
                     "wifi_profile" => repair::set_wifi_private(),
+                    // NEW: RDP auto-repair
+                    "rdp" => repair::disable_rdp(),
                     // Alert only
                     "vpn" => repair::alert_vpn_disconnected(),
                     "doh" => repair::alert_doh_changed(),
                     "laps" => repair::alert_laps_changed(),
                     "eventlog" => repair::alert_event_log_cleared(),
+                    "dhcp" => repair::alert_dhcp_spoofing(),
+                    "bitlocker" => repair::alert_bitlocker_off(),
+                    "credguard" => repair::alert_credential_guard_off(),
                     // Quarantine
                     "fakeext" => repair::delete_fake_files(),
                     "hid" => repair::disable_hid_devices(),
@@ -200,10 +205,10 @@ fn main() {
         if !issues_after.is_empty() {
             for (category, _) in &issues_after {
                 match category.as_str() {
-                    "firewall" | "defender" | "uac" | "wu" | "sr" | "smartscreen" | "secureboot" => {
+                    "firewall" | "defender" | "uac" | "wu" | "sr" | "smartscreen" | "secureboot" | "bitlocker" | "credguard" => {
                         trust::deduct_trust(&format!("{} compromised", category), 10);
                     }
-                    "dns" | "hosts" | "proxy" | "startup" => {
+                    "dns" | "hosts" | "proxy" | "startup" | "dhcp" | "rdp" => {
                         trust::deduct_trust(&format!("{} changed", category), 5);
                     }
                     _ => {}

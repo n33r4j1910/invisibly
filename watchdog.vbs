@@ -16,17 +16,16 @@ Do While True
     Set colItems = objWMIService.ExecQuery(strQuery)
     
     If colItems.Count = 0 Then
-        ' Restart daemon
-        WshShell.Run "C:\Invisibly\target\release\invisibly-daemon.exe", 0, False
+        ' Restart daemon with Admin privileges
+        WshShell.Run "powershell -Command ""Start-Process 'C:\Invisibly\target\release\invisibly-daemon.exe' -Verb RunAs""", 0, False
         WScript.Sleep 5000
         
         ' Restart tray
         Set colItems = objWMIService.ExecQuery("SELECT * FROM Win32_Process WHERE Name = 'invisibly-tray.exe'")
         If colItems.Count = 0 Then
-            WshShell.Run "C:\Invisibly\target\release\invisibly-tray.exe", 0, False
+            WshShell.Run "powershell -Command ""Start-Process 'C:\Invisibly\target\release\invisibly-tray.exe' -Verb RunAs""", 0, False
         End If
         
-        ' Show notification
         ShowNotification "Invisibly has been automatically restarted", 5
     End If
     

@@ -2,7 +2,7 @@
 // This software is proprietary and confidential.
 
 //! Auto-Repair Module — Silent with Safety Levels
-//! - Automatic: DNS, Firewall, Proxy, Defender, UAC, Windows Update, System Restore, SmartScreen, IPv6
+//! - Automatic: DNS, Firewall, Proxy, Defender, UAC, Windows Update, System Restore, SmartScreen, IPv6, RDP
 //! - Alert Only: VPN, DoH, LAPS, Event Log
 //! - Confirm Required: HID, BT, Adapter, Startup, Brute Force
 //! - Never Auto (Quarantine): Fake Extensions
@@ -315,6 +315,34 @@ pub fn clean_unicode_bidi() {
 }
 
 // ============================================
+// NEW: RDP AUTO-REPAIR
+// ============================================
+
+/// Disables RDP by stopping the Remote Desktop Service and blocking port 3389
+pub fn disable_rdp() {
+    // Stop and disable Remote Desktop Service
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-Command",
+        "Set-Service -Name TermService -StartupType Disabled -Status Stopped"]);
+    let result1 = run_command(&mut cmd, "RDP", "Disabled Remote Desktop Service");
+
+    // Block port 3389 in Windows Firewall
+    let mut cmd2 = Command::new("netsh");
+    cmd2.args(["advfirewall", "firewall", "add", "rule",
+               "name=TS-Block-RDP", "dir=in", "action=block",
+               "protocol=TCP", "localport=3389"]);
+    let result2 = run_command(&mut cmd2, "RDP", "Blocked RDP port 3389");
+
+    if result1 && result2 {
+        log_repair("RDP", "✅ RDP disabled successfully");
+        log_incident("RDP", "Disabled", "RDP was disabled (port 3389 blocked, service stopped)");
+    } else {
+        log_repair("RDP", "⚠️ RDP disable partially failed");
+        log_incident("RDP", "Partial", "RDP disable partially failed - manual review recommended");
+    }
+}
+
+// ============================================
 // ALERT ONLY REPAIRS
 // ============================================
 
@@ -361,6 +389,21 @@ pub fn alert_doh_changed() {
 pub fn alert_laps_changed() {
     log_repair("LAPS", "⚠️ LAPS status changed");
     log_incident("LAPS", "Alert", "LAPS status changed");
+}
+
+pub fn alert_dhcp_spoofing() {
+    log_repair("DHCP", "⚠️ DHCP server changed - possible spoofing");
+    log_incident("DHCP", "Alert", "DHCP server changed - possible DHCP spoofing attack");
+}
+
+pub fn alert_bitlocker_off() {
+    log_repair("BitLocker", "⚠️ BitLocker is disabled");
+    log_incident("BitLocker", "Alert", "BitLocker is disabled - data at risk");
+}
+
+pub fn alert_credential_guard_off() {
+    log_repair("CredGuard", "⚠️ Credential Guard is disabled");
+    log_incident("CredGuard", "Alert", "Credential Guard is disabled - credential theft risk");
 }
 
 // ============================================
