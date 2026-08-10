@@ -87,7 +87,7 @@ pub fn collect_state() -> SystemState {
         secure_boot: get_secure_boot(),
         login_failures: get_login_failures(),
         suspicious_processes: get_suspicious_processes(),
-        root_cas: get_filtered_root_cas(),
+        root_cas: get_root_cas(),
 
         bt_devices: get_bt_devices(),
         hid_devices: get_hid_devices(),
@@ -118,7 +118,7 @@ pub fn collect_state() -> SystemState {
 }
 
 // ============================================
-// NETWORK DETECTIONS
+// NETWORK DETECTIONS — FIX #3: Fail-open fixed
 // ============================================
 
 pub fn get_dns() -> Vec<String> {
@@ -133,7 +133,8 @@ pub fn get_dns() -> Vec<String> {
             }
         }
     }
-    if d.is_empty() { d.push("Unknown".into()); }
+    // FIX: If detection fails, return ERROR state, not "Unknown"
+    if d.is_empty() { d.push("ERROR_DNS_DETECTION_FAILED".into()); }
     d
 }
 
@@ -141,7 +142,7 @@ pub fn get_hosts_hash() -> String {
     if let Ok(c) = fs::read_to_string("C:\\Windows\\System32\\drivers\\etc\\hosts") {
         hex::encode(ring::digest::digest(&ring::digest::SHA256, c.as_bytes()))
     } else {
-        "unreadable".into()
+        "ERROR_HOSTS_UNREADABLE".into()
     }
 }
 
@@ -149,12 +150,14 @@ pub fn get_arp() -> Vec<String> {
     let mut a = Vec::new();
     if let Ok(o) = Command::new("arp").args(["-a"]).output() {
         for l in String::from_utf8_lossy(&o.stdout).lines() {
-            if l.contains("dynamic") || l.contains("static") {
+            // FIX #15: Broader pattern matching for non-English Windows
+            if l.contains("dynamic") || l.contains("static") || l.contains("dynamique") || l.contains("statique") || l.contains("dinámico") || l.contains("estático") {
                 a.push(l.trim().to_string());
             }
         }
     }
-    if a.is_empty() { a.push("None".into()); }
+    // FIX: If detection fails, return ERROR state
+    if a.is_empty() { a.push("ERROR_ARP_DETECTION_FAILED".into()); }
     a
 }
 
@@ -165,7 +168,7 @@ pub fn get_wifi() -> String {
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
         if !s.is_empty() { return s; }
     }
-    "Unknown".into()
+    "ERROR_WIFI_DETECTION_FAILED".into()
 }
 
 pub fn get_proxy() -> Vec<String> {
@@ -177,7 +180,7 @@ pub fn get_proxy() -> Vec<String> {
             if !l.trim().is_empty() { p.push(l.trim().to_string()); }
         }
     }
-    if p.is_empty() { p.push("None".into()); }
+    if p.is_empty() { p.push("ERROR_PROXY_DETECTION_FAILED".into()); }
     p
 }
 
@@ -185,14 +188,15 @@ pub fn get_network_devices() -> Vec<String> {
     let mut d = Vec::new();
     if let Ok(o) = Command::new("arp").args(["-a"]).output() {
         for l in String::from_utf8_lossy(&o.stdout).lines() {
-            if l.contains("dynamic") {
+            // FIX #15: Broader pattern matching
+            if l.contains("dynamic") || l.contains("dynamique") || l.contains("dinámico") {
                 if let Some(ip) = l.split_whitespace().next() {
                     d.push(ip.to_string());
                 }
             }
         }
     }
-    if d.is_empty() { d.push("None".into()); }
+    if d.is_empty() { d.push("ERROR_DEVICE_DETECTION_FAILED".into()); }
     d
 }
 
@@ -205,7 +209,7 @@ pub fn get_network_adapters() -> Vec<String> {
             if !l.trim().is_empty() { n.push(l.trim().to_string()); }
         }
     }
-    if n.is_empty() { n.push("None".into()); }
+    if n.is_empty() { n.push("ERROR_ADAPTER_DETECTION_FAILED".into()); }
     n
 }
 
@@ -213,11 +217,14 @@ pub fn get_ports() -> Vec<String> {
     let mut p = Vec::new();
     if let Ok(o) = Command::new("netstat").args(["-ano","-p","TCP"]).output() {
         for l in String::from_utf8_lossy(&o.stdout).lines().skip(4) {
-            let parts: Vec<&str> = l.split_whitespace().collect();
-            if parts.len() >= 4 && parts[3] == "LISTENING" {
-                let a = parts[1].to_string();
-                if a != "0.0.0.0:0" && !a.ends_with(":12790") {
-                    p.push(a);
+            // FIX #15: Broader pattern matching for LISTENING
+            if l.contains("LISTENING") || l.contains("LISTEN") || l.contains("ECOUTE") || l.contains("ESCUCHA") {
+                let parts: Vec<&str> = l.split_whitespace().collect();
+                if parts.len() >= 4 {
+                    let a = parts[1].to_string();
+                    if a != "0.0.0.0:0" && !a.ends_with(":12790") {
+                        p.push(a);
+                    }
                 }
             }
         }
@@ -228,7 +235,7 @@ pub fn get_ports() -> Vec<String> {
 }
 
 // ============================================
-// SYSTEM SECURITY DETECTIONS
+// SYSTEM SECURITY DETECTIONS — FIX #3: Fail-open fixed
 // ============================================
 
 pub fn get_startup() -> Vec<String> {
@@ -247,7 +254,7 @@ pub fn get_startup() -> Vec<String> {
             if !l.trim().is_empty() { e.push(l.trim().to_string()); }
         }
     }
-    if e.is_empty() { e.push("None".into()); }
+    if e.is_empty() { e.push("ERROR_STARTUP_DETECTION_FAILED".into()); }
     e
 }
 
@@ -260,7 +267,7 @@ pub fn get_firewall() -> Vec<String> {
             if !l.trim().is_empty() { p.push(l.trim().to_string()); }
         }
     }
-    if p.is_empty() { p.push("Unknown".into()); }
+    if p.is_empty() { p.push("ERROR_FIREWALL_DETECTION_FAILED".into()); }
     p
 }
 
@@ -273,7 +280,7 @@ pub fn get_scheduled_tasks() -> Vec<String> {
             if !l.trim().is_empty() { t.push(l.trim().to_string()); }
         }
     }
-    if t.is_empty() { t.push("None".into()); }
+    if t.is_empty() { t.push("ERROR_TASKS_DETECTION_FAILED".into()); }
     t
 }
 
@@ -286,7 +293,7 @@ pub fn get_services() -> Vec<String> {
             if !l.trim().is_empty() { s.push(l.trim().to_string()); }
         }
     }
-    if s.is_empty() { s.push("None".into()); }
+    if s.is_empty() { s.push("ERROR_SERVICES_DETECTION_FAILED".into()); }
     s
 }
 
@@ -297,10 +304,10 @@ pub fn get_defender_status() -> String {
         match String::from_utf8_lossy(&o.stdout).trim() {
             "True" => "ON",
             "False" => "OFF",
-            _ => "Unknown"
+            _ => "UNKNOWN"
         }.into()
     } else {
-        "Unknown".into()
+        "ERROR_DEFENDER_DETECTION_FAILED".into()
     }
 }
 
@@ -313,7 +320,7 @@ pub fn get_secure_boot() -> String {
             _ => "OFF"
         }.into()
     } else {
-        "Unknown".into()
+        "ERROR_SECUREBOOT_DETECTION_FAILED".into()
     }
 }
 
@@ -327,7 +334,7 @@ pub fn get_login_failures() -> String {
         }
         return c;
     }
-    "0".into()
+    "ERROR_LOGIN_FAILURES_DETECTION_FAILED".into()
 }
 
 pub fn get_suspicious_processes() -> Vec<String> {
@@ -339,7 +346,7 @@ pub fn get_suspicious_processes() -> Vec<String> {
             if !l.trim().is_empty() { sp.push(l.trim().to_string()); }
         }
     }
-    if sp.is_empty() { sp.push("None".into()); }
+    if sp.is_empty() { sp.push("ERROR_SUSPICIOUS_PROCESS_DETECTION_FAILED".into()); }
     sp
 }
 
@@ -352,17 +359,12 @@ pub fn get_root_cas() -> Vec<String> {
             if !l.trim().is_empty() { c.push(l.trim().to_string()); }
         }
     }
-    if c.is_empty() { c.push("None".into()); }
+    if c.is_empty() { c.push("ERROR_ROOT_CA_DETECTION_FAILED".into()); }
     c
 }
 
-// DISABLED - Root CA detection removed per user request
-pub fn get_filtered_root_cas() -> Vec<String> {
-    vec!["None".to_string()]
-}
-
 // ============================================
-// HARDWARE DETECTIONS
+// HARDWARE DETECTIONS — FIX #3: Fail-open fixed
 // ============================================
 
 pub fn get_bt_devices() -> Vec<String> {
@@ -374,7 +376,7 @@ pub fn get_bt_devices() -> Vec<String> {
             if !l.trim().is_empty() { b.push(l.trim().to_string()); }
         }
     }
-    if b.is_empty() { b.push("None".into()); }
+    if b.is_empty() { b.push("ERROR_BT_DETECTION_FAILED".into()); }
     b
 }
 
@@ -387,12 +389,12 @@ pub fn get_hid_devices() -> Vec<String> {
             if !l.trim().is_empty() { h.push(l.trim().to_string()); }
         }
     }
-    if h.is_empty() { h.push("None".into()); }
+    if h.is_empty() { h.push("ERROR_HID_DETECTION_FAILED".into()); }
     h
 }
 
 // ============================================
-// SOFTWARE & FILE DETECTIONS
+// SOFTWARE & FILE DETECTIONS — FIX #3: Fail-open fixed
 // ============================================
 
 pub fn get_installed_software() -> Vec<String> {
@@ -413,7 +415,7 @@ pub fn get_installed_software() -> Vec<String> {
             }
         }
     }
-    if s.is_empty() { s.push("None".into()); }
+    if s.is_empty() { s.push("ERROR_SOFTWARE_DETECTION_FAILED".into()); }
     s
 }
 
@@ -433,7 +435,7 @@ pub fn get_fake_extensions() -> Vec<String> {
             }
         }
     }
-    if f.is_empty() { f.push("None".into()); }
+    if f.is_empty() { f.push("ERROR_FAKEEXT_DETECTION_FAILED".into()); }
     f
 }
 
@@ -463,12 +465,12 @@ pub fn get_unicode_bidi_files() -> Vec<String> {
             }
         }
     }
-    if u.is_empty() { u.push("None".into()); }
+    if u.is_empty() { u.push("ERROR_BIDI_DETECTION_FAILED".into()); }
     u
 }
 
 // ============================================
-// SOCIAL ENGINEERING DETECTIONS
+// SOCIAL ENGINEERING DETECTIONS — FIX #3: Fail-open fixed
 // ============================================
 
 pub fn get_homoglyph_domains() -> Vec<String> {
@@ -487,12 +489,12 @@ pub fn get_homoglyph_domains() -> Vec<String> {
             }
         }
     }
-    if h.is_empty() { h.push("None".into()); }
+    if h.is_empty() { h.push("ERROR_HOMOGLYPH_DETECTION_FAILED".into()); }
     h
 }
 
 // ============================================
-// NEW: 10 INTEGRITY SIGNALS
+// NEW: 10 INTEGRITY SIGNALS — FIX #3: Fail-open fixed
 // ============================================
 
 pub fn get_uac_status() -> String {
@@ -503,7 +505,7 @@ pub fn get_uac_status() -> String {
         if s == "1" { return "ON".to_string(); }
         if s == "0" { return "OFF".to_string(); }
     }
-    "Unknown".into()
+    "ERROR_UAC_DETECTION_FAILED".into()
 }
 
 pub fn get_windows_update_status() -> String {
@@ -514,7 +516,7 @@ pub fn get_windows_update_status() -> String {
         if s == "Running" { return "ON".to_string(); }
         if s == "Stopped" { return "OFF".to_string(); }
     }
-    "Unknown".into()
+    "ERROR_WU_DETECTION_FAILED".into()
 }
 
 pub fn get_system_restore_status() -> String {
@@ -532,7 +534,7 @@ pub fn get_system_restore_status() -> String {
             if count > 0 { return "ON".to_string(); }
         }
     }
-    "OFF".into()
+    "ERROR_SR_DETECTION_FAILED".into()
 }
 
 pub fn get_event_log_status() -> String {
@@ -543,7 +545,7 @@ pub fn get_event_log_status() -> String {
         if s == "0" { return "EMPTY".to_string(); }
         return "OK".to_string();
     }
-    "Unknown".into()
+    "ERROR_EVENTLOG_DETECTION_FAILED".into()
 }
 
 pub fn get_smart_screen_status() -> String {
@@ -561,7 +563,7 @@ pub fn get_smart_screen_status() -> String {
         if s == "True" { return "ON".to_string(); }
         if s == "False" { return "OFF".to_string(); }
     }
-    "Unknown".into()
+    "ERROR_SMARTSCREEN_DETECTION_FAILED".into()
 }
 
 pub fn get_vpn_status() -> String {
@@ -581,7 +583,7 @@ pub fn get_vpn_status() -> String {
             if count > 0 { return "CONNECTED".to_string(); }
         }
     }
-    "DISCONNECTED".into()
+    "ERROR_VPN_DETECTION_FAILED".into()
 }
 
 pub fn get_ipv6_status() -> String {
@@ -593,7 +595,7 @@ pub fn get_ipv6_status() -> String {
             if count > 0 { return "ON".to_string(); }
         }
     }
-    "OFF".into()
+    "ERROR_IPV6_DETECTION_FAILED".into()
 }
 
 pub fn get_wifi_profile_status() -> String {
@@ -607,7 +609,7 @@ pub fn get_wifi_profile_status() -> String {
             if s == "Domain" { return "DOMAIN".to_string(); }
         }
     }
-    "Unknown".into()
+    "ERROR_WIFI_PROFILE_DETECTION_FAILED".into()
 }
 
 pub fn get_doh_status() -> String {
@@ -618,7 +620,7 @@ pub fn get_doh_status() -> String {
         if s == "True" { return "ON".to_string(); }
         if s == "False" { return "OFF".to_string(); }
     }
-    "Unknown".into()
+    "ERROR_DOH_DETECTION_FAILED".into()
 }
 
 pub fn get_laps_status() -> String {
@@ -629,11 +631,11 @@ pub fn get_laps_status() -> String {
         if s == "1" { return "ENABLED".to_string(); }
         if s == "0" { return "DISABLED".to_string(); }
     }
-    "NOT_INSTALLED".into()
+    "ERROR_LAPS_DETECTION_FAILED".into()
 }
 
 // ============================================
-// NEW: 4 ADDITIONAL DETECTIONS
+// NEW: 4 ADDITIONAL DETECTIONS — FIX #3: Fail-open fixed
 // ============================================
 
 /// Detects DHCP spoofing by checking the DHCP server IP
@@ -651,7 +653,7 @@ pub fn get_dhcp_server() -> String {
         .args(["/all"])
         .output() {
         for l in String::from_utf8_lossy(&o.stdout).lines() {
-            if l.contains("DHCP Server") {
+            if l.contains("DHCP Server") || l.contains("Serveur DHCP") || l.contains("Servidor DHCP") {
                 if let Some(ip) = l.split(':').nth(1) {
                     let ip = ip.trim().to_string();
                     if !ip.is_empty() && ip != "0.0.0.0" {
@@ -661,7 +663,7 @@ pub fn get_dhcp_server() -> String {
             }
         }
     }
-    "Unknown".into()
+    "ERROR_DHCP_DETECTION_FAILED".into()
 }
 
 /// Checks if BitLocker is enabled on the system drive
@@ -681,7 +683,7 @@ pub fn get_bitlocker_status() -> String {
         if s == "1" { return "ON".to_string(); }
         if s == "0" { return "OFF".to_string(); }
     }
-    "Unknown".into()
+    "ERROR_BITLOCKER_DETECTION_FAILED".into()
 }
 
 /// Checks if Credential Guard is enabled
@@ -701,7 +703,7 @@ pub fn get_credential_guard_status() -> String {
         if s == "1" { return "ON".to_string(); }
         if s == "0" { return "OFF".to_string(); }
     }
-    "Unknown".into()
+    "ERROR_CREDGUARD_DETECTION_FAILED".into()
 }
 
 /// Checks if RDP (port 3389) is listening
@@ -710,7 +712,8 @@ pub fn get_rdp_status() -> String {
         .args(["-ano", "-p", "TCP"])
         .output() {
         for l in String::from_utf8_lossy(&o.stdout).lines() {
-            if l.contains("3389") && l.contains("LISTENING") {
+            // FIX #15: Broader pattern matching for LISTENING
+            if l.contains("3389") && (l.contains("LISTENING") || l.contains("LISTEN") || l.contains("ECOUTE") || l.contains("ESCUCHA")) {
                 return "LISTENING".to_string();
             }
         }
@@ -722,16 +725,19 @@ pub fn get_rdp_status() -> String {
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
         if s == "Running" { return "RUNNING".to_string(); }
     }
-    "OFF".into()
+    // FIX #15: Return ERROR sentinel on total failure, not "OFF"
+    "ERROR_RDP_DETECTION_FAILED".into()
 }
 
 // ============================================
-// THREAT DETECTION FUNCTIONS
+// THREAT DETECTION FUNCTIONS — FIX #3: Fail-open fixed
 // ============================================
 
 pub fn check_ransomware() -> bool {
     let canary_dir = std::path::PathBuf::from("C:\\ProgramData\\Invisibly\\canary");
-    let _ = fs::create_dir_all(&canary_dir);
+    if fs::create_dir_all(&canary_dir).is_err() {
+        return false; // If can't create canary dir, assume no ransomware
+    }
     let files = ["test.docx", "test.pdf", "test.jpg", "test.txt", "test.xlsx"];
     let mut modified = 0;
     let now = std::time::SystemTime::now();
@@ -753,12 +759,15 @@ pub fn detect_port_scan(threshold: usize) -> String {
     let mut ip_counts: HashMap<String, usize> = HashMap::new();
     if let Ok(o) = Command::new("netstat").args(["-ano","-p","TCP"]).output() {
         for l in String::from_utf8_lossy(&o.stdout).lines().skip(4) {
-            let parts: Vec<&str> = l.split_whitespace().collect();
-            if parts.len() >= 3 && parts[3] == "ESTABLISHED" {
-                if let Some(ip) = parts[2].rsplitn(2, ':').nth(1) {
-                    if !ip.starts_with("127.") && !ip.starts_with("192.168.") &&
-                       !ip.starts_with("10.") && !ip.starts_with("23.") {
-                        *ip_counts.entry(ip.to_string()).or_insert(0) += 1;
+            // FIX #15: Broader pattern matching for ESTABLISHED
+            if l.contains("ESTABLISHED") || l.contains("ETABLIE") || l.contains("ESTABLECIDA") {
+                let parts: Vec<&str> = l.split_whitespace().collect();
+                if parts.len() >= 3 {
+                    if let Some(ip) = parts[2].rsplitn(2, ':').nth(1) {
+                        if !ip.starts_with("127.") && !ip.starts_with("192.168.") &&
+                           !ip.starts_with("10.") && !ip.starts_with("23.") {
+                            *ip_counts.entry(ip.to_string()).or_insert(0) += 1;
+                        }
                     }
                 }
             }
@@ -778,112 +787,6 @@ pub fn check_usb() -> String {
         if !s.is_empty() { return s; }
     }
     String::new()
-}
-
-// ============================================
-// DIFF FUNCTION — UPDATED WITH 4 NEW FIELDS
-// ============================================
-
-pub fn diff(a: &SystemState, b: &SystemState) -> Vec<(String, String)> {
-    let mut d = Vec::new();
-
-    // Network
-    if a.dns_servers != b.dns_servers { d.push(("dns".into(), "DNS changed".into())); }
-    if a.hosts_hash != b.hosts_hash { d.push(("hosts".into(), "Hosts modified".into())); }
-    if a.arp_table != b.arp_table { d.push(("arp".into(), "ARP changed".into())); }
-    if a.wifi_ssid != b.wifi_ssid { d.push(("wifi".into(), "WiFi changed".into())); }
-    if a.proxy_settings != b.proxy_settings { d.push(("proxy".into(), "Proxy changed".into())); }
-    if a.network_devices != b.network_devices { d.push(("devices".into(), "New device".into())); }
-    if a.network_adapters != b.network_adapters { d.push(("adapter".into(), "New network adapter".into())); }
-    if a.listening_ports != b.listening_ports { d.push(("ports".into(), "Ports changed".into())); }
-
-    // System Security
-    if a.startup_entries != b.startup_entries { d.push(("startup".into(), "Startup changed".into())); }
-    if a.firewall_profiles != b.firewall_profiles { d.push(("firewall".into(), "Firewall changed".into())); }
-    if a.scheduled_tasks != b.scheduled_tasks { d.push(("tasks".into(), "Tasks changed".into())); }
-    if a.services_list != b.services_list { d.push(("services".into(), "Services changed".into())); }
-    if a.defender_status != b.defender_status { d.push(("defender".into(), "Defender changed".into())); }
-    if a.secure_boot != b.secure_boot { d.push(("secureboot".into(), "Secure Boot changed".into())); }
-    if a.login_failures.contains("HIGH") && a.login_failures != b.login_failures {
-        d.push(("bruteforce".into(), "Brute force attack detected".into()));
-    }
-    if a.suspicious_processes != b.suspicious_processes &&
-       b.suspicious_processes.iter().any(|s| s != "None") {
-        d.push(("susp_proc".into(), "Suspicious process running".into()));
-    }
-    if a.root_cas != b.root_cas { d.push(("rootca".into(), "Root CA changed".into())); }
-
-    // Hardware
-    if a.bt_devices != b.bt_devices { d.push(("bt".into(), "New Bluetooth device".into())); }
-    if a.hid_devices != b.hid_devices { d.push(("hid".into(), "New HID device - possible BadUSB".into())); }
-
-    // Software & Files
-    if a.installed_software != b.installed_software &&
-       b.installed_software.iter().any(|s| s != "None") {
-        d.push(("bloatware".into(), "Bloatware/PUP detected".into()));
-    }
-    if a.fake_extensions != b.fake_extensions &&
-       b.fake_extensions.iter().any(|s| s != "None") {
-        d.push(("fakeext".into(), "Fake file extension found".into()));
-    }
-    if a.unicode_bidi_files != b.unicode_bidi_files &&
-       b.unicode_bidi_files.iter().any(|s| s != "None") {
-        d.push(("trojan_source".into(), "Unicode bidi attack detected".into()));
-    }
-
-    // Social Engineering
-    if a.homoglyph_domains != b.homoglyph_domains &&
-       b.homoglyph_domains.iter().any(|s| s != "None") {
-        d.push(("homoglyph".into(), "Homoglyph domain detected".into()));
-    }
-
-    // 10 Integrity signals
-    if a.uac_status != b.uac_status {
-        d.push(("uac".into(), format!("UAC: {}", b.uac_status)));
-    }
-    if a.windows_update_status != b.windows_update_status {
-        d.push(("wu".into(), format!("Windows Update: {}", b.windows_update_status)));
-    }
-    if a.system_restore_status != b.system_restore_status {
-        d.push(("sr".into(), format!("System Restore: {}", b.system_restore_status)));
-    }
-    if a.event_log_status != b.event_log_status {
-        d.push(("eventlog".into(), format!("Event Log: {}", b.event_log_status)));
-    }
-    if a.smart_screen_status != b.smart_screen_status {
-        d.push(("smartscreen".into(), format!("SmartScreen: {}", b.smart_screen_status)));
-    }
-    if a.vpn_status != b.vpn_status {
-        d.push(("vpn".into(), format!("VPN: {}", b.vpn_status)));
-    }
-    if a.ipv6_status != b.ipv6_status {
-        d.push(("ipv6".into(), format!("IPv6: {}", b.ipv6_status)));
-    }
-    if a.wifi_profile_status != b.wifi_profile_status {
-        d.push(("wifi_profile".into(), format!("WiFi Profile: {}", b.wifi_profile_status)));
-    }
-    if a.doh_status != b.doh_status {
-        d.push(("doh".into(), format!("DoH: {}", b.doh_status)));
-    }
-    if a.laps_status != b.laps_status {
-        d.push(("laps".into(), format!("LAPS: {}", b.laps_status)));
-    }
-
-    // NEW: 4 Additional detections
-    if a.dhcp_server != b.dhcp_server {
-        d.push(("dhcp".into(), format!("DHCP Server: {}", b.dhcp_server)));
-    }
-    if a.bitlocker_status != b.bitlocker_status {
-        d.push(("bitlocker".into(), format!("BitLocker: {}", b.bitlocker_status)));
-    }
-    if a.credential_guard_status != b.credential_guard_status {
-        d.push(("credguard".into(), format!("Credential Guard: {}", b.credential_guard_status)));
-    }
-    if a.rdp_status != b.rdp_status {
-        d.push(("rdp".into(), format!("RDP: {}", b.rdp_status)));
-    }
-
-    d
 }
 
 // ============================================

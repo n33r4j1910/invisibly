@@ -49,7 +49,9 @@ impl TrustLevel {
         }
     }
 
+    // FIX #23: Use saturating_sub to prevent underflow
     pub fn apply_deduction(&mut self, reason: &str, deduction: u8) {
+        // Use saturating_sub to prevent underflow (score can't go below 0)
         let new_score = self.score.saturating_sub(deduction);
         let event = TrustEvent {
             timestamp: chrono::Local::now().to_rfc3339(),
@@ -63,8 +65,10 @@ impl TrustLevel {
         self.save();
     }
 
+    // FIX #23: Use saturating_add and min to prevent overflow
     pub fn recover(&mut self, amount: u8) {
-        let new_score = (self.score + amount).min(100);
+        // Use saturating_add to prevent overflow, then clamp to 100
+        let new_score = self.score.saturating_add(amount).min(100);
         if new_score > self.score {
             let event = TrustEvent {
                 timestamp: chrono::Local::now().to_rfc3339(),

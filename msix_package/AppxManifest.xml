@@ -3,23 +3,33 @@
          xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest"
          xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
          xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-         IgnorableNamespaces="uap mp rescap">
-    <Identity Name="DeltaIQx.Invisibly" Publisher="CN=DeltaIQx" Version="2.0.0.0" />
+         xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
+         xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+         IgnorableNamespaces="uap mp rescap desktop6 uap5">
+  
+  <Identity Name="DeltaIQx.Invisibly" Publisher="CN=DeltaIQx" Version="2.0.0.0" />
+  
   <Properties>
     <DisplayName>Invisibly</DisplayName>
     <PublisherDisplayName>DeltaIQx LLP</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
     <Description>Autonomous endpoint security agent. Detects 38 threats, auto-repairs 26. 100% offline. No cloud. No telemetry.</Description>
   </Properties>
+  
   <Dependencies>
     <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.22621.0" />
   </Dependencies>
+  
   <Capabilities>
     <rescap:Capability Name="runFullTrust" />
+    <rescap:Capability Name="localSystemServices" />
+    <rescap:Capability Name="packagedServices" />
   </Capabilities>
+  
   <Resources>
     <Resource Language="en-us" />
   </Resources>
+  
   <Applications>
     <Application Id="App" Executable="invisibly-daemon.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements DisplayName="Invisibly" Description="Autonomous endpoint security agent"
@@ -27,6 +37,15 @@
            BackgroundColor="transparent">
         <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
       </uap:VisualElements>
+      <Extensions>
+        <desktop6:Extension Category="windows.service" EntryPoint="Windows.FullTrustApplication" Executable="invisibly-daemon.exe">
+          <desktop6:Service Name="InvisiblyDaemon" StartAccount="localSystem" StartupType="auto"/>
+        </desktop6:Extension>
+        <uap5:Extension Category="windows.startupTask" EntryPoint="Windows.FullTrustApplication" Executable="invisibly-tray.exe">
+          <uap5:StartupTask TaskId="InvisiblyTray" Enabled="true" DisplayName="Invisibly Tray"/>
+        </uap5:Extension>
+      </Extensions>
     </Application>
   </Applications>
+  
 </Package>

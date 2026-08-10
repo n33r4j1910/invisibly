@@ -1,4 +1,7 @@
-// Copyright (c) 2026 DeltaIQx LLP. All rights reserved.`n// This software is proprietary and confidential.`nuse std::fs;
+// Copyright (c) 2026 DeltaIQx LLP. All rights reserved.
+// This software is proprietary and confidential.
+
+use std::fs;
 use std::path::Path;
 use std::process::Command;
 use std::env;
@@ -14,61 +17,97 @@ fn main() {
     let msix_dir = target_dir.join("msix");
 
     // Create MSIX directory
-    let _ = fs::create_dir_all(&msix_dir);
+    if let Err(e) = fs::create_dir_all(&msix_dir) {
+        panic!("Failed to create msix directory: {}", e);
+    }
 
+    // FIX #31: Check return values, fail build on error
     // Copy executables to MSIX layout
-    let _ = fs::copy(exe_path.join("invisibly-daemon.exe"), msix_dir.join("invisibly-daemon.exe"));
-    let _ = fs::copy(exe_path.join("invisibly-tray.exe"), msix_dir.join("invisibly-tray.exe"));
+    let daemon_src = exe_path.join("invisibly-daemon.exe");
+    let daemon_dst = msix_dir.join("invisibly-daemon.exe");
+    if daemon_src.exists() {
+        if let Err(e) = fs::copy(&daemon_src, &daemon_dst) {
+            panic!("Failed to copy invisibly-daemon.exe: {}", e);
+        }
+        println!("✅ Copied invisibly-daemon.exe to MSIX package");
+    } else {
+        panic!("invisibly-daemon.exe not found at {:?}", daemon_src);
+    }
 
-    // Create AppxManifest
-    let manifest_path = msix_dir.join("AppxManifest.xml");
-    let manifest_content = r#"
-<Package xmlns="http://schemas.microsoft.com/appx/2010/manifest"
-         xmlns:rescap="http://schemas.microsoft.com/appx/2014/11/manifest"
-         xmlns:uap5="http://schemas.microsoft.com/appx/2015/12/manifest">
-    <Identity Name="Invisibly"
-              Publisher="CN=Invisibly"
-              Version="1.0.0.0"/>
-    <Properties>
-        <DisplayName>Invisibly</DisplayName>
-        <Description>Lightweight autonomous endpoint security agent</Description>
-        <Logo>assets\logo.png</Logo>
-        <PublisherDisplayName>Invisibly</PublisherDisplayName>
-    </Properties>
-    <Resources>
-        <Resource Language="en-US"/>
-    </Resources>
-    <Capabilities>
-        <Capability Name="internetClient"/>
-        <rescap:Capability Name="runFullTrust"/>
-    </Capabilities>
-    <Applications>
-        <Application Id="Invisibly" Executable="invisibly-daemon.exe" EntryPoint="Windows.FullTrustApplication">
-            <Extensions>
-                <uap5:Extension Category="windows.appExecutionAlias" EntryPoint="Windows.FullTrustApplication" Executable="invisibly-daemon.exe">
-                    <uap5:AppExecutionAlias>
-                        <uap5:ExecutionAlias Alias="invisibly.exe"/>
-                    </uap5:AppExecutionAlias>
-                </uap5:Extension>
-            </Extensions>
-        </Application>
-    </Applications>
-</Package>"#;
+    let tray_src = exe_path.join("invisibly-tray.exe");
+    let tray_dst = msix_dir.join("invisibly-tray.exe");
+    if tray_src.exists() {
+        if let Err(e) = fs::copy(&tray_src, &tray_dst) {
+            panic!("Failed to copy invisibly-tray.exe: {}", e);
+        }
+        println!("✅ Copied invisibly-tray.exe to MSIX package");
+    } else {
+        panic!("invisibly-tray.exe not found at {:?}", tray_src);
+    }
 
-    fs::write(manifest_path, manifest_content).unwrap();
+    // Copy assets from msix_package
+    let source_assets = Path::new("msix_package").join("Assets");
+    let dest_assets = msix_dir.join("Assets");
+    if source_assets.exists() {
+        if let Err(e) = fs::create_dir_all(&dest_assets) {
+            panic!("Failed to create assets directory: {}", e);
+        }
+        match fs::read_dir(&source_assets) {
+            Ok(entries) => {
+                for entry in entries {
+                    match entry {
+                        Ok(entry) => {
+                            let dest = dest_assets.join(entry.file_name());
+                            if let Err(e) = fs::copy(entry.path(), dest) {
+                                panic!("Failed to copy asset: {}", e);
+                            }
+                        }
+                        Err(e) => panic!("Failed to read asset entry: {}", e),
+                    }
+                }
+                println!("✅ Copied assets to MSIX package");
+            }
+            Err(e) => panic!("Failed to read assets directory: {}", e),
+        }
+    } else {
+        println!("⚠️ No assets directory found, skipping");
+    }
 
-    // Create placeholder icon if not exists
-    let assets_dir = msix_dir.join("assets");
-    let _ = fs::create_dir_all(&assets_dir);
+    // Copy the actual AppxManifest from msix_package (not generated)
+    let source_manifest = Path::new("msix_package").join("AppxManifest.xml");
+    if source_manifest.exists() {
+        let dest_manifest = msix_dir.join("AppxManifest.xml");
+        if let Err(e) = fs::copy(&source_manifest, &dest_manifest) {
+            panic!("Failed to copy AppxManifest.xml: {}", e);
+        }
+        println!("✅ Copied AppxManifest.xml to MSIX package");
+    } else {
+        panic!("AppxManifest.xml not found at {:?}", source_manifest);
+    }
 
     // Generate MSIX using MakeAppx
-    let _ = Command::new("makeappx")
+    let msix_path = target_dir.join("Invisibly.msix");
+    let status = Command::new("makeappx")
         .args([
             "pack",
             "/d", msix_dir.to_str().unwrap(),
-            "/p", target_dir.join("Invisibly.msix").to_str().unwrap(),
+            "/p", msix_path.to_str().unwrap(),
         ])
         .status();
 
+    match status {
+        Ok(status) => {
+            if status.success() {
+                println!("✅ MSIX package created successfully at: {}", msix_path.display());
+            } else {
+                panic!("makeappx failed with exit code: {:?}", status.code());
+            }
+        }
+        Err(e) => {
+            panic!("Failed to run makeappx: {}", e);
+        }
+    }
+
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=msix_package/AppxManifest.xml");
 }

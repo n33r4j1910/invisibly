@@ -4,6 +4,7 @@
 //! Configuration Module - Monitor-Only
 use std::fs;
 use std::path::Path;
+use chrono::Local;
 
 const DATA_DIR: &str = "C:\\ProgramData\\Invisibly";
 
@@ -27,6 +28,7 @@ pub fn get_data_dir() -> String {
     DATA_DIR.to_string()
 }
 
+// FIX #13: Log icacls failures, don't silently ignore
 pub fn ensure_data_dir() -> std::io::Result<()> {
     fs::create_dir_all(DATA_DIR)?;
     fs::create_dir_all(format!("{}\\quarantine", DATA_DIR))?;
@@ -36,12 +38,48 @@ pub fn ensure_data_dir() -> std::io::Result<()> {
     // === ACL HARDENING: Restrict access to SYSTEM and Administrators ===
     #[cfg(windows)]
     {
-        let _ = std::process::Command::new("icacls")
+        let result = std::process::Command::new("icacls")
             .args([DATA_DIR, "/inheritance:r", "/grant", "SYSTEM:F", "/grant", "Administrators:F", "/remove", "Users", "/remove", "Everyone"])
             .status();
+        
+        match result {
+            Ok(status) => {
+                if status.success() {
+                    println!("✅ Data directory ACL hardening applied successfully");
+                } else {
+                    let msg = format!("⚠️ Data directory ACL hardening failed with exit code: {}", status.code().unwrap_or(-1));
+                    println!("{}", msg);
+                    // Log the failure to file
+                    log_acl_failure(&msg);
+                }
+            }
+            Err(e) => {
+                let msg = format!("⚠️ Failed to run icacls: {}", e);
+                println!("{}", msg);
+                log_acl_failure(&msg);
+            }
+        }
     }
     
     Ok(())
+}
+
+// FIX #13: Log ACL failures to file
+fn log_acl_failure(msg: &str) {
+    let log_path = format!("{}\\acl_hardening.log", DATA_DIR);
+    let entry = format!(
+        "{}|ACL_FAILURE|{}\n",
+        Local::now().format("%Y-%m-%d %H:%M:%S"),
+        msg
+    );
+    let _ = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .and_then(|mut f| {
+            use std::io::Write;
+            f.write_all(entry.as_bytes())
+        });
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -56,7 +94,6 @@ pub struct ConsentRecord {
 pub fn log_consent(record: &ConsentRecord) {
     let path = format!("{}\\consent.log", DATA_DIR);
     let entry = serde_json::to_string(record).unwrap_or_default();
-    // FIXED: Use append mode instead of overwrite
     let _ = fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -83,7 +120,7 @@ pub fn get_consent_history() -> Vec<ConsentRecord> {
 pub fn require_user_consent(action: &str, details: &str) -> bool {
     let record = ConsentRecord {
         action: action.to_string(),
-        timestamp: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        timestamp: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
         user: "SYSTEM".to_string(),
         status: "monitor-only".to_string(),
         details: details.to_string(),
@@ -115,7 +152,7 @@ pub fn backup_file(path: &str) -> bool {
     let backup_dir = format!("{}\\backups", DATA_DIR);
     let _ = fs::create_dir_all(&backup_dir);
     let filename = Path::new(path).file_name().unwrap_or_default();
-    let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+    let timestamp = Local::now().format("%Y%m%d_%H%M%S");
     let backup_path = format!("{}\\{}_{}.backup", backup_dir, filename.to_string_lossy(), timestamp);
     match fs::copy(path, &backup_path) {
         Ok(_) => true,

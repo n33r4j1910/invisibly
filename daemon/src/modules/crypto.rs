@@ -2,13 +2,9 @@
 // This software is proprietary and confidential.
 
 //! Cryptography module — Minimal but functional
-//!
-//! get_master_key() returns the base seed.
-//! Different keys are derived from the seed for different purposes:
-//! - HMAC key: used for baseline signing
-//! - XOR key: used for baseline encryption (obfuscation)
 
 use ring::rand::{SecureRandom, SystemRandom};
+use ring::hmac;
 use std::fs;
 use windows::Win32::System::Memory::VirtualLock;
 
@@ -41,10 +37,9 @@ pub fn get_master_key() -> [u8; MASTER_KEY_LEN] {
 }
 
 // ============================================
-// KEY DERIVATION — Separate keys for different purposes
+// KEY DERIVATION
 // ============================================
 
-/// Derive a key for HMAC signing
 pub fn get_hmac_key() -> [u8; MASTER_KEY_LEN] {
     let base = get_master_key();
     use ring::digest::{digest, SHA256};
@@ -55,7 +50,6 @@ pub fn get_hmac_key() -> [u8; MASTER_KEY_LEN] {
     result
 }
 
-/// Derive a key for XOR encryption (obfuscation)
 pub fn get_xor_key() -> [u8; MASTER_KEY_LEN] {
     let base = get_master_key();
     use ring::digest::{digest, SHA256};
@@ -67,7 +61,25 @@ pub fn get_xor_key() -> [u8; MASTER_KEY_LEN] {
 }
 
 // ============================================
-// ENCRYPT / DECRYPT (XOR-based, used for baseline obfuscation)
+// HMAC SIGNING
+// ============================================
+
+pub fn hmac_sign(data: &[u8]) -> String {
+    let key_bytes = get_hmac_key();
+    let key = hmac::Key::new(hmac::HMAC_SHA256, &key_bytes);
+    let tag = hmac::sign(&key, data);
+    hex::encode(tag.as_ref())
+}
+
+pub fn hmac_verify(data: &[u8], signature: &str) -> bool {
+    let key_bytes = get_hmac_key();
+    let key = hmac::Key::new(hmac::HMAC_SHA256, &key_bytes);
+    let expected = hex::decode(signature).unwrap_or_default();
+    hmac::verify(&key, data, &expected).is_ok()
+}
+
+// ============================================
+// ENCRYPT / DECRYPT (XOR-based obfuscation)
 // ============================================
 
 pub fn encrypt_data(data: &[u8], key: &[u8; MASTER_KEY_LEN]) -> Vec<u8> {

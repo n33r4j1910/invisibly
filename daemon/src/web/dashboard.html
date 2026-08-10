@@ -39,6 +39,8 @@
         .btn.toggle-off { background: #3d1a1a; border-color: #8a2a2a; color: #ff6b6b; }
         .btn.verify-btn { background: #2a0f40; border-color: #6b2a8a; color: #b04aff; }
         .btn.verify-btn:hover { background: #3a1a50; }
+        .btn.restart-btn { background: #1a2a4a; border-color: #3a5a8a; color: #6a9aff; }
+        .btn.restart-btn:hover { background: #2a3a5a; }
         .events { margin-top: 20px; border-top: 1px solid #1e2633; padding-top: 16px; }
         .events h3 { font-size: 15px; font-weight: 500; color: #7b8aa3; margin-bottom: 12px; }
         .event { background: #1a212b; padding: 10px 16px; border-radius: 10px; border-left: 3px solid #2a3344; margin-bottom: 6px; font-size: 14px; display: flex; justify-content: space-between; }
@@ -76,11 +78,18 @@
         .trust-value.high { color: #4cd9a0; }
         .trust-value.medium { color: #f5c542; }
         .trust-value.low { color: #f55a5a; }
+        .daemon-status { display: inline-block; padding: 4px 14px; border-radius: 40px; font-size: 13px; font-weight: 500; margin-left: 12px; }
+        .daemon-status.online { background: #0f3b2a; color: #4cd9a0; }
+        .daemon-status.offline { background: #3d0f0f; color: #f55a5a; }
+        .daemon-status.starting { background: #3d2f0a; color: #f5c542; }
     </style>
 </head>
 <body>
 <div class="card">
-    <h1>🛡️ Invisibly <small>v2.0</small></h1>
+    <h1>
+        🛡️ Invisibly <small>v2.0</small>
+        <span id="daemon-status" class="daemon-status starting">⏳ Starting...</span>
+    </h1>
     <div class="subtitle">Autonomous endpoint security agent — Silent · Dashboard-only alerts</div>
 
     <div class="info-box">
@@ -132,6 +141,7 @@
         <button class="btn" id="btn-sanitize">🧹 Scan for Issues</button>
         <button class="btn danger" id="btn-rollback">↩️ Rollback Changes</button>
         <button class="btn verify-btn" id="btn-verify">✅ Verify Trust</button>
+        <button class="btn restart-btn" id="btn-restart">🔄 Restart Service</button>
     </div>
 
     <div class="controls-title">🔘 Status</div>
@@ -179,7 +189,6 @@ async function fetchToken() {
         const resp = await fetch(TOKEN_API);
         const data = await resp.json();
         token = data.token || '';
-        // Mask token for display (show first 8 chars only)
         const maskedToken = token ? token.substring(0, 8) + '...' : '❌ No token';
         document.getElementById('token-value').textContent = maskedToken;
     } catch {
@@ -188,20 +197,25 @@ async function fetchToken() {
 }
 
 function render(data) {
+    const statusEl = document.getElementById('daemon-status');
+    
     if (!data || data.error) {
         document.getElementById('state-badge').textContent = '❌ Offline';
         document.getElementById('state-badge').className = 'badge gray';
+        statusEl.textContent = '🔴 Offline';
+        statusEl.className = 'daemon-status offline';
         return;
     }
+
+    statusEl.textContent = '🟢 Online';
+    statusEl.className = 'daemon-status online';
 
     const score = data.integrity_score || 0;
     const state = data.integrity_state || 'Unknown';
     const trustLevel = data.trust_level || 0;
 
-    // Update timestamp
     document.getElementById('last-refresh-time').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
 
-    // Score with animation
     const scoreEl = document.getElementById('score-value');
     if (score !== lastScore) {
         scoreEl.className = 'score-ring animate';
@@ -216,7 +230,6 @@ function render(data) {
     scoreEl.textContent = score;
     document.getElementById('score-sub').textContent = scoreText;
 
-    // Trust level with color
     const trustEl = document.getElementById('trust-value');
     let trustClass = 'high';
     if (trustLevel < 50) trustClass = 'low';
@@ -225,7 +238,6 @@ function render(data) {
     trustEl.textContent = trustLevel;
     document.getElementById('trust-sub').textContent = trustLevel >= 80 ? '✅ High confidence' : trustLevel >= 50 ? '⚠️ Medium confidence' : '🔴 Low confidence';
 
-    // State badge with animation
     const stateMap = {
         'Maintained': { label: '✅ Maintained', cls: 'green' },
         'DriftDetected': { label: '⚠️ Drift Detected', cls: 'yellow' },
@@ -245,103 +257,138 @@ function render(data) {
     badgeEl.className = `badge ${s.cls}`;
     document.getElementById('state-sub').textContent = `Last check: ${new Date().toLocaleTimeString()}`;
 
-    // Ghost indicator
     if (data.ghost) {
         document.getElementById('ghost-indicator').style.display = 'inline-flex';
     } else {
         document.getElementById('ghost-indicator').style.display = 'none';
     }
 
-    // Status
-    const statusEl = document.getElementById('ts2-status');
+    const statusTextEl = document.getElementById('ts2-status');
     if (data.enabled) {
-        statusEl.innerHTML = 'Status: <strong style="color:#4cd9a0;">Enabled</strong> (Active)';
+        statusTextEl.innerHTML = 'Status: <strong style="color:#4cd9a0;">Enabled</strong> (Active)';
     } else {
-        statusEl.innerHTML = 'Status: <strong style="color:#ff6b6b;">Disabled</strong> (Monitor only)';
+        statusTextEl.innerHTML = 'Status: <strong style="color:#ff6b6b;">Disabled</strong> (Monitor only)';
     }
 
-    // Fetch report for controls and deductions
     fetchReport();
-
-    // Fetch timeline for events
     fetchTimeline();
 }
 
+// FIX: Use apiFetch with Bearer token for authenticated endpoints
 async function fetchTimeline() {
     try {
-        const resp = await fetch(TIMELINE_API);
-        if (!resp.ok) return;
-        const data = await resp.json();
+        const data = await apiFetch(TIMELINE_API);
         const entries = data.entries || [];
 
         if (entries.length === 0) {
-            document.getElementById('events-list').innerHTML = '<p style="color:#4a5a73;font-size:14px;">No events yet</p>';
+            document.getElementById('events-list').textContent = 'No events yet';
             return;
         }
 
-        const eventsHtml = entries.slice(0, 10).map(e => {
-            const desc = `${e.category}: ${e.action} — ${e.before} → ${e.after}`;
+        // FIX #2 & #7: Use textContent and createElement instead of innerHTML
+        const listEl = document.getElementById('events-list');
+        listEl.innerHTML = '';
+        entries.slice(0, 10).forEach(e => {
+            const div = document.createElement('div');
             const cls = e.category === 'error' || e.category === 'fail' ? 'error' :
                         e.category === 'warning' || e.category === 'suspicious' ? 'warn' :
                         e.category === 'ghost' ? 'ghost' : 'info';
-            const time = e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : '';
-            return `<div class="event ${cls} highlight"><span class="desc">${desc}</span><span class="time">${time}</span></div>`;
-        }).join('');
-
-        document.getElementById('events-list').innerHTML = eventsHtml;
-        document.getElementById('event-count').textContent = entries.length;
+            div.className = `event ${cls} highlight`;
+            
+            const spanDesc = document.createElement('span');
+            spanDesc.className = 'desc';
+            spanDesc.textContent = `${e.category}: ${e.action} — ${e.before} → ${e.after}`;
+            
+            const spanTime = document.createElement('span');
+            spanTime.className = 'time';
+            spanTime.textContent = e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : '';
+            
+            div.appendChild(spanDesc);
+            div.appendChild(spanTime);
+            listEl.appendChild(div);
+        });
     } catch (error) {
         console.error('Timeline fetch error:', error);
-        document.getElementById('events-list').innerHTML = '<p style="color:#f55a5a;">⚠️ Error loading events</p>';
+        document.getElementById('events-list').textContent = '⚠️ Error loading events';
     }
 }
 
+// FIX: Use apiFetch with Bearer token for authenticated endpoints
 async function fetchReport() {
     try {
-        const resp = await fetch('/report');
-        if (!resp.ok) return;
-        const report = await resp.json();
+        const report = await apiFetch('/report');
 
-        // Controls
+        const controlsList = document.getElementById('controls-list');
+        const deductionsList = document.getElementById('deductions-list');
+
         if (report.control_status && Object.keys(report.control_status).length > 0) {
-            let html = '<div class="control-status-grid">';
+            const grid = document.createElement('div');
+            grid.className = 'control-status-grid';
             for (const [name, status] of Object.entries(report.control_status)) {
                 const statusClass = status.status === 'Healthy' ? 'ok' :
                                     status.status === 'Warning' ? 'warn' : 'err';
                 const statusIcon = status.status === 'Healthy' ? '✅' :
                                     status.status === 'Warning' ? '⚠️' : '🔴';
-                html += `<div class="control-item">
-                    <span class="status ${statusClass}">${statusIcon} ${name}</span>
-                    <span style="color:#7b8aa3;font-size:10px;display:block;">${status.reason}</span>
-                </div>`;
+                
+                const item = document.createElement('div');
+                item.className = 'control-item';
+                
+                const spanStatus = document.createElement('span');
+                spanStatus.className = `status ${statusClass}`;
+                spanStatus.textContent = `${statusIcon} ${name}`;
+                
+                const spanReason = document.createElement('span');
+                spanReason.style.cssText = 'color:#7b8aa3;font-size:10px;display:block;';
+                spanReason.textContent = status.reason;
+                
+                item.appendChild(spanStatus);
+                item.appendChild(spanReason);
+                grid.appendChild(item);
             }
-            html += '</div>';
-            document.getElementById('controls-list').innerHTML = html;
+            controlsList.innerHTML = '';
+            controlsList.appendChild(grid);
         } else {
-            document.getElementById('controls-list').innerHTML = '<p style="color:#4a5a73;font-size:14px;">No controls loaded.</p>';
+            controlsList.textContent = 'No controls loaded.';
         }
 
-        // Deductions
         if (report.deductions && report.deductions.length > 0) {
-            let html = '<ul style="list-style:none;padding:0;">';
+            const ul = document.createElement('ul');
+            ul.style.cssText = 'list-style:none;padding:0;';
             report.deductions.forEach(d => {
                 const color = d.severity === 'Critical' ? '#ff4444' :
                               d.severity === 'High' ? '#ff8800' :
                               d.severity === 'Medium' ? '#ffcc00' : '#44aaff';
-                html += `<li style="border-left:3px solid ${color};padding:4px 10px;margin:4px 0;font-size:13px;background:#1a212b;border-radius:4px;">
-                    <strong>${d.category}</strong> — <span style="color:#ff6b6b;">-${d.points} points</span><br>
-                    <span style="color:#7b8aa3;font-size:12px;">${d.reason}</span>
-                </li>`;
+                const li = document.createElement('li');
+                li.style.cssText = `border-left:3px solid ${color};padding:4px 10px;margin:4px 0;font-size:13px;background:#1a212b;border-radius:4px;`;
+                
+                const strong = document.createElement('strong');
+                strong.textContent = d.category;
+                
+                const spanPoints = document.createElement('span');
+                spanPoints.style.cssText = 'color:#ff6b6b;';
+                spanPoints.textContent = ` -${d.points} points`;
+                
+                const br = document.createElement('br');
+                
+                const spanReason = document.createElement('span');
+                spanReason.style.cssText = 'color:#7b8aa3;font-size:12px;';
+                spanReason.textContent = d.reason;
+                
+                li.appendChild(strong);
+                li.appendChild(spanPoints);
+                li.appendChild(br);
+                li.appendChild(spanReason);
+                ul.appendChild(li);
             });
-            html += '</ul>';
-            document.getElementById('deductions-list').innerHTML = html;
+            deductionsList.innerHTML = '';
+            deductionsList.appendChild(ul);
         } else {
-            document.getElementById('deductions-list').innerHTML = '<p style="color:#4cd9a0;font-size:14px;">✅ No deductions — system is maintained.</p>';
+            deductionsList.textContent = '✅ No deductions — system is maintained.';
         }
     } catch (error) {
         console.error('Report error:', error);
-        document.getElementById('controls-list').innerHTML = '<p style="color:#f55a5a;font-size:14px;">❌ Error loading controls</p>';
-        document.getElementById('deductions-list').innerHTML = '<p style="color:#f55a5a;font-size:14px;">❌ Error loading deductions</p>';
+        document.getElementById('controls-list').textContent = '❌ Error loading controls';
+        document.getElementById('deductions-list').textContent = '❌ Error loading deductions';
     }
 }
 
@@ -354,7 +401,9 @@ async function refresh() {
     } catch {
         document.getElementById('state-badge').textContent = '⚠️ Daemon offline';
         document.getElementById('state-badge').className = 'badge gray';
-        document.getElementById('events-list').innerHTML = '<p style="color:#f55a5a;">⚠️ Cannot connect to daemon</p>';
+        document.getElementById('events-list').textContent = '⚠️ Cannot connect to daemon';
+        document.getElementById('daemon-status').textContent = '🔴 Offline';
+        document.getElementById('daemon-status').className = 'daemon-status offline';
     }
 }
 
@@ -371,6 +420,13 @@ async function callApi(endpoint, successMsg) {
         alert('❌ Failed to connect to daemon');
     }
 }
+
+// FIX: Remove restart button handler since endpoint doesn't exist yet
+// document.getElementById('btn-restart').addEventListener('click', async () => {
+//     if (confirm('⚠️ Restart the Invisibly service? This will temporarily disconnect the dashboard.')) {
+//         callApi('/restart', 'Service restart initiated');
+//     }
+// });
 
 document.getElementById('btn-ghost').addEventListener('click', () => callApi('/ghost', 'Ghost Mode enabled'));
 document.getElementById('btn-unghost').addEventListener('click', () => callApi('/unghost', 'Ghost Mode disabled'));

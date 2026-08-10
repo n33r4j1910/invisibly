@@ -11,7 +11,6 @@ pub mod crypto;
 pub mod integrity;
 pub mod timeline;
 pub mod baseline;
-pub mod policy;
 pub mod trust;
 
 // Behavior-based detection

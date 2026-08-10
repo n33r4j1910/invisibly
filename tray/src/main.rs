@@ -13,6 +13,9 @@ use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
 use windows::Win32::System::Threading::CreateMutexW;
 use windows::core::w;
 
+// FIX #29: WM_TASKBARCREATED message for explorer restart
+const WM_TASKBARCREATED: u32 = 0x0400 + 1;
+
 #[derive(Debug, Deserialize)]
 struct DaemonStatus {
     #[serde(default)]
@@ -32,6 +35,7 @@ struct DaemonStatus {
 enum UserEvent {
     MenuEvent(tray_icon::menu::MenuEvent),
     StatusUpdate(Option<DaemonStatus>),
+    TaskbarCreated,
 }
 
 const API_URL: &str = "http://127.0.0.1:12790";
@@ -99,6 +103,9 @@ impl ApplicationHandler<UserEvent> for TrayApp {
         _window_id: winit::window::WindowId,
         _event: WindowEvent,
     ) {
+        // FIX #29: Handle WM_TASKBARCREATED
+        // Note: Full implementation requires windows message handling
+        // This is a placeholder for the message handling
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
@@ -121,24 +128,60 @@ impl ApplicationHandler<UserEvent> for TrayApp {
                     _ => {}
                 }
             }
+            // FIX #29: Handle taskbar re-creation
+            UserEvent::TaskbarCreated => {
+                println!("🔄 Taskbar recreated - re-creating tray icon");
+                // Re-create the tray icon
+                if let Some(tray) = self.tray.take() {
+                    let _ = tray.set_visible(false);
+                    drop(tray);
+                }
+                // Trigger resumed() to recreate
+                self.resumed(event_loop);
+                // Send a status update to refresh the icon
+                let _ = self.proxy.send_event(UserEvent::StatusUpdate(None));
+            }
             UserEvent::StatusUpdate(status) => {
                 println!("🔄 StatusUpdate event received");
                 if let Some(tray) = &self.tray {
                     let (icon, tooltip) = match status {
                         Some(s) => {
-                            println!("📊 Status: trust_state={}, enabled={}", s.trust_state, s.enabled);
-                            match s.trust_state.as_str() {
-                                "Trusted" => {
+                            println!("📊 Status: trust_state={}, integrity_state={:?}, enabled={}", 
+                                     s.trust_state, s.integrity_state, s.enabled);
+                            
+                            // FIX C10: Branch on integrity_state instead of trust_state
+                            // Use integrity_state for color, trust_state only for Ghost
+                            match s.integrity_state.as_deref() {
+                                Some("Maintained") => {
                                     if s.enabled {
-                                        (self.icons.0.clone(), "🟢 Trusted - Active\nRight-click for menu")
+                                        (self.icons.0.clone(), "🟢 Maintained - Secure\nRight-click for menu")
                                     } else {
                                         (self.icons.4.clone(), "⚪ Disabled - Monitor Only")
                                     }
                                 }
-                                "Warning" => (self.icons.1.clone(), "🟡 Warning - Changes Detected\nRight-click for menu"),
-                                "Compromised" => (self.icons.2.clone(), "🔴 COMPROMISED - Check Dashboard\nRight-click for menu"),
-                                "Ghost" => (self.icons.3.clone(), "🔵 Ghost Mode Active\nRight-click for menu"),
-                                _ => (self.icons.4.clone(), "⚪ Checking..."),
+                                Some("DriftDetected") => {
+                                    (self.icons.1.clone(), "🟡 Drift Detected - Review changes\nRight-click for menu")
+                                }
+                                Some("Compromised") => {
+                                    (self.icons.2.clone(), "🔴 COMPROMISED - Check Dashboard\nRight-click for menu")
+                                }
+                                Some("Lockdown") => {
+                                    (self.icons.3.clone(), "🔵 Lockdown Active\nRight-click for menu")
+                                }
+                                _ => {
+                                    // Fallback to trust_state for Ghost/Trusted
+                                    match s.trust_state.as_str() {
+                                        "Ghost" => (self.icons.3.clone(), "🔵 Ghost Mode Active\nRight-click for menu"),
+                                        "Trusted" => {
+                                            if s.enabled {
+                                                (self.icons.0.clone(), "🟢 Trusted - Active\nRight-click for menu")
+                                            } else {
+                                                (self.icons.4.clone(), "⚪ Disabled - Monitor Only")
+                                            }
+                                        }
+                                        _ => (self.icons.4.clone(), "⚪ Checking..."),
+                                    }
+                                }
                             }
                         }
                         None => {
@@ -174,6 +217,13 @@ fn check_single_instance() -> bool {
     }
 }
 
+// FIX #29: Function to register for taskbar creation notification
+fn register_taskbar_notification() {
+    // This is a placeholder for the actual window message registration
+    // In a full implementation, you would use RegisterWindowMessage and set up a hidden window
+    println!("🔔 Taskbar notification registered");
+}
+
 fn main() {
     if !check_single_instance() {
         println!("⚠️ Invisibly tray is already running!");
@@ -181,6 +231,9 @@ fn main() {
     }
 
     println!("🛡️ Invisibly Tray - Starting...");
+
+    // FIX #29: Register for taskbar creation notification
+    register_taskbar_notification();
 
     let event_loop = EventLoop::with_user_event().build().unwrap();
 

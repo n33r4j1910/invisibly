@@ -93,7 +93,7 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
     if baseline.defender_status != current.defender_status {
         changes.push((
             "defender".to_string(),
-            format!("Defender changed to: {}", current.defender_status),
+            current.defender_status.clone(), // Pass raw value
             "automatic".to_string()
         ));
     }
@@ -101,7 +101,7 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
     if baseline.uac_status != current.uac_status {
         changes.push((
             "uac".to_string(),
-            format!("UAC changed to: {}", current.uac_status),
+            current.uac_status.clone(), // Pass raw value
             "automatic".to_string()
         ));
     }
@@ -109,7 +109,7 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
     if baseline.windows_update_status != current.windows_update_status {
         changes.push((
             "wu".to_string(),
-            format!("Windows Update changed to: {}", current.windows_update_status),
+            current.windows_update_status.clone(), // Pass raw value
             "automatic".to_string()
         ));
     }
@@ -117,7 +117,7 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
     if baseline.system_restore_status != current.system_restore_status {
         changes.push((
             "sr".to_string(),
-            format!("System Restore changed to: {}", current.system_restore_status),
+            current.system_restore_status.clone(), // Pass raw value
             "automatic".to_string()
         ));
     }
@@ -125,7 +125,7 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
     if baseline.smart_screen_status != current.smart_screen_status {
         changes.push((
             "smartscreen".to_string(),
-            format!("SmartScreen changed to: {}", current.smart_screen_status),
+            current.smart_screen_status.clone(), // Pass raw value
             "automatic".to_string()
         ));
     }
@@ -133,7 +133,7 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
     if baseline.secure_boot != current.secure_boot {
         changes.push((
             "secureboot".to_string(),
-            format!("Secure Boot changed to: {}", current.secure_boot),
+            current.secure_boot.clone(), // Pass raw value
             "manual".to_string()
         ));
     }
@@ -246,10 +246,10 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
     // AUTHENTICATION CHANGES
     // ============================================
 
-    if baseline.login_failures != current.login_failures && current.login_failures.contains("HIGH") {
+    if baseline.login_failures != current.login_failures {
         changes.push((
             "bruteforce".to_string(),
-            format!("Login failures: {}", current.login_failures),
+            current.login_failures.clone(), // Pass raw value
             "automatic".to_string()
         ));
     }
@@ -261,7 +261,7 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
     if baseline.vpn_status != current.vpn_status {
         changes.push((
             "vpn".to_string(),
-            format!("VPN changed to: {}", current.vpn_status),
+            current.vpn_status.clone(), // Pass raw value
             "alert".to_string()
         ));
     }
@@ -269,7 +269,7 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
     if baseline.ipv6_status != current.ipv6_status {
         changes.push((
             "ipv6".to_string(),
-            format!("IPv6 changed to: {}", current.ipv6_status),
+            current.ipv6_status.clone(), // Pass raw value
             "automatic".to_string()
         ));
     }
@@ -277,7 +277,7 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
     if baseline.wifi_profile_status != current.wifi_profile_status {
         changes.push((
             "wifi_profile".to_string(),
-            format!("WiFi profile changed to: {}", current.wifi_profile_status),
+            current.wifi_profile_status.clone(), // Pass raw value
             "automatic".to_string()
         ));
     }
@@ -285,7 +285,7 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
     if baseline.doh_status != current.doh_status {
         changes.push((
             "doh".to_string(),
-            format!("DoH changed to: {}", current.doh_status),
+            current.doh_status.clone(), // Pass raw value
             "alert".to_string()
         ));
     }
@@ -293,7 +293,62 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
     if baseline.laps_status != current.laps_status {
         changes.push((
             "laps".to_string(),
-            format!("LAPS changed to: {}", current.laps_status),
+            current.laps_status.clone(), // Pass raw value
+            "alert".to_string()
+        ));
+    }
+
+    // ============================================
+    // NEW: DHCP SPOOFING
+    // ============================================
+    if baseline.dhcp_server != current.dhcp_server {
+        changes.push((
+            "dhcp".to_string(),
+            current.dhcp_server.clone(), // Pass raw value
+            "alert".to_string()
+        ));
+    }
+
+    // ============================================
+    // NEW: BITLOCKER
+    // ============================================
+    if baseline.bitlocker_status != current.bitlocker_status {
+        changes.push((
+            "bitlocker".to_string(),
+            current.bitlocker_status.clone(), // Pass raw value
+            "alert".to_string()
+        ));
+    }
+
+    // ============================================
+    // NEW: CREDENTIAL GUARD
+    // ============================================
+    if baseline.credential_guard_status != current.credential_guard_status {
+        changes.push((
+            "credguard".to_string(),
+            current.credential_guard_status.clone(), // Pass raw value
+            "alert".to_string()
+        ));
+    }
+
+    // ============================================
+    // NEW: RDP
+    // ============================================
+    if baseline.rdp_status != current.rdp_status {
+        changes.push((
+            "rdp".to_string(),
+            current.rdp_status.clone(), // Pass raw value
+            "automatic".to_string()
+        ));
+    }
+
+    // ============================================
+    // NEW: EVENT LOG
+    // ============================================
+    if baseline.event_log_status != current.event_log_status {
+        changes.push((
+            "eventlog".to_string(),
+            current.event_log_status.clone(), // Pass raw value
             "alert".to_string()
         ));
     }

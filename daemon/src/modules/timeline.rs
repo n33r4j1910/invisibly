@@ -9,10 +9,33 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
+use std::sync::Mutex;
 use chrono::Local;
 
 const DATA_DIR: &str = "C:\\ProgramData\\Invisibly";
 const TIMELINE_FILE: &str = "C:\\ProgramData\\Invisibly\\timeline.jsonl";
+
+// ============================================
+// IN-MEMORY CACHE — FIX #25
+// ============================================
+
+static TIMELINE_CACHE: once_cell::sync::Lazy<Mutex<Option<Vec<TimelineEntry>>>> =
+    once_cell::sync::Lazy::new(|| Mutex::new(None));
+
+fn invalidate_cache() {
+    let mut cache = TIMELINE_CACHE.lock().unwrap();
+    *cache = None;
+}
+
+fn get_cached_entries() -> Vec<TimelineEntry> {
+    let mut cache = TIMELINE_CACHE.lock().unwrap();
+    if let Some(entries) = cache.as_ref() {
+        return entries.clone();
+    }
+    let entries = read_entries_from_disk();
+    *cache = Some(entries.clone());
+    entries
+}
 
 // ============================================
 // TYPES
@@ -27,7 +50,6 @@ pub struct TimelineEntry {
     pub before: String,
     pub after: String,
     pub result: RepairResult,
-    pub duration_ms: u64,
     pub previous_hash: String,
     pub hash: String,
 }
@@ -44,6 +66,7 @@ pub enum RepairResult {
 pub struct Timeline {
     pub entries: Vec<TimelineEntry>,
     pub last_hash: String,
+    pub chain_valid: bool,
 }
 
 // ============================================
@@ -56,7 +79,6 @@ pub fn add_entry(
     before: &str,
     after: &str,
     result: RepairResult,
-    duration_ms: u64,
 ) -> Result<(), String> {
     let previous = get_last_hash();
     let id = get_next_id();
@@ -69,29 +91,52 @@ pub fn add_entry(
         before: before.to_string(),
         after: after.to_string(),
         result: result.clone(),
-        duration_ms,
         previous_hash: previous.clone(),
-        hash: compute_hash(&previous, id, category, action, before, after, &result, duration_ms),
+        hash: compute_hash(&previous, id, category, action, before, after, &result),
     };
 
     append_entry(&entry)?;
+    invalidate_cache(); // FIX #25: Invalidate cache on new entry
     Ok(())
 }
 
+// FIX: Fixed timestamp move error with explicit clone
 pub fn get_timeline(limit: usize) -> Timeline {
-    let entries = read_entries();
-    let limited: Vec<TimelineEntry> = entries.into_iter().rev().take(limit).collect();
+    let entries = get_cached_entries();
+    let limited: Vec<TimelineEntry> = entries
+        .into_iter()
+        .rev()
+        .take(limit)
+        .map(|e| TimelineEntry {
+            id: e.id,
+            timestamp: e.timestamp.clone(),
+            category: e.category.clone(),
+            action: e.action.clone(),
+            before: e.before.clone(),
+            after: e.after.clone(),
+            result: e.result.clone(),
+            previous_hash: e.previous_hash.clone(),
+            hash: e.hash.clone(),
+        })
+        .collect();
     let last_hash = get_last_hash();
+    let chain_valid = verify_chain();
     Timeline {
         entries: limited,
         last_hash,
+        chain_valid,
     }
 }
 
 pub fn get_full_timeline() -> Timeline {
-    let entries = read_entries();
+    let entries = get_cached_entries();
     let last_hash = get_last_hash();
-    Timeline { entries, last_hash }
+    let chain_valid = verify_chain();
+    Timeline {
+        entries,
+        last_hash,
+        chain_valid,
+    }
 }
 
 pub fn export_timeline(format: &str) -> String {
@@ -103,8 +148,9 @@ pub fn export_timeline(format: &str) -> String {
     }
 }
 
+// FIX #12: verify_chain() now called and exposed
 pub fn verify_chain() -> bool {
-    let entries = read_entries();
+    let entries = read_entries_from_disk();
     if entries.is_empty() {
         return true;
     }
@@ -119,7 +165,6 @@ pub fn verify_chain() -> bool {
             &entry.before,
             &entry.after,
             &entry.result,
-            entry.duration_ms,
         );
         if computed != entry.hash {
             return false;
@@ -129,17 +174,46 @@ pub fn verify_chain() -> bool {
     true
 }
 
+// FIX #12: Verify chain on startup
+pub fn verify_chain_on_startup() -> bool {
+    let result = verify_chain();
+    if result {
+        println!("✅ Timeline chain verified");
+    } else {
+        println!("❌ Timeline chain verification FAILED! Possible tampering detected.");
+    }
+    result
+}
+
+// FIX #12: Initialize timeline on daemon startup
+pub fn init_timeline() {
+    let _ = verify_chain_on_startup();
+}
+
+/// API endpoint to get chain verification status
+pub fn get_chain_status() -> serde_json::Value {
+    let valid = verify_chain();
+    let entries = get_cached_entries();
+    let last_hash = get_last_hash();
+    serde_json::json!({
+        "valid": valid,
+        "entry_count": entries.len(),
+        "last_hash": last_hash,
+        "last_entry": entries.last().map(|e| e.timestamp.clone())
+    })
+}
+
 // ============================================
 // HELPERS
 // ============================================
 
 fn get_last_hash() -> String {
-    let entries = read_entries();
+    let entries = get_cached_entries();
     entries.last().map(|e| e.hash.clone()).unwrap_or_else(|| "0".to_string())
 }
 
 fn get_next_id() -> u64 {
-    let entries = read_entries();
+    let entries = get_cached_entries();
     entries.len() as u64 + 1
 }
 
@@ -151,16 +225,15 @@ fn compute_hash(
     before: &str,
     after: &str,
     result: &RepairResult,
-    duration_ms: u64,
 ) -> String {
     let data = format!(
-        "{}{}{}{}{}{}{:?}{}",
-        previous, id, category, action, before, after, result, duration_ms
+        "{}{}{}{}{}{}{:?}",
+        previous, id, category, action, before, after, result
     );
     hex::encode(ring::digest::digest(&ring::digest::SHA256, data.as_bytes()))
 }
 
-fn read_entries() -> Vec<TimelineEntry> {
+fn read_entries_from_disk() -> Vec<TimelineEntry> {
     let path = Path::new(TIMELINE_FILE);
     if !path.exists() {
         return Vec::new();
@@ -215,14 +288,12 @@ fn format_timeline_markdown(entries: &[TimelineEntry]) -> String {
              - **Before:** `{}`\n\
              - **After:** `{}`\n\
              - **Result:** {}\n\
-             - **Duration:** {}ms\n\
              - **Entry ID:** {}\n\
              - **Chain Hash:** `{}`\n\n",
             entry.action,
             entry.before,
             entry.after,
             result_str,
-            entry.duration_ms,
             entry.id,
             &entry.hash[..16]
         ));
