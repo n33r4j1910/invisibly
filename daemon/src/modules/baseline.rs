@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
-const DATA_DIR: &str = "C:\\ProgramData\\Invisibly";
 const BASELINE_FILE: &str = "C:\\ProgramData\\Invisibly\\baseline.signed";
 const BASELINE_HASH_FILE: &str = "C:\\ProgramData\\Invisibly\\baseline.hash";
 const VERSIONS_DIR: &str = "C:\\ProgramData\\Invisibly\\baselines\\";

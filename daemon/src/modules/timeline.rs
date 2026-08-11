@@ -12,7 +12,6 @@ use std::path::Path;
 use std::sync::Mutex;
 use chrono::Local;
 
-const DATA_DIR: &str = "C:\\ProgramData\\Invisibly";
 const TIMELINE_FILE: &str = "C:\\ProgramData\\Invisibly\\timeline.jsonl";
 
 // ============================================
@@ -100,34 +99,6 @@ pub fn add_entry(
     Ok(())
 }
 
-// FIX: Fixed timestamp move error with explicit clone
-pub fn get_timeline(limit: usize) -> Timeline {
-    let entries = get_cached_entries();
-    let limited: Vec<TimelineEntry> = entries
-        .into_iter()
-        .rev()
-        .take(limit)
-        .map(|e| TimelineEntry {
-            id: e.id,
-            timestamp: e.timestamp.clone(),
-            category: e.category.clone(),
-            action: e.action.clone(),
-            before: e.before.clone(),
-            after: e.after.clone(),
-            result: e.result.clone(),
-            previous_hash: e.previous_hash.clone(),
-            hash: e.hash.clone(),
-        })
-        .collect();
-    let last_hash = get_last_hash();
-    let chain_valid = verify_chain();
-    Timeline {
-        entries: limited,
-        last_hash,
-        chain_valid,
-    }
-}
-
 pub fn get_full_timeline() -> Timeline {
     let entries = get_cached_entries();
     let last_hash = get_last_hash();
@@ -188,19 +159,6 @@ pub fn verify_chain_on_startup() -> bool {
 // FIX #12: Initialize timeline on daemon startup
 pub fn init_timeline() {
     let _ = verify_chain_on_startup();
-}
-
-/// API endpoint to get chain verification status
-pub fn get_chain_status() -> serde_json::Value {
-    let valid = verify_chain();
-    let entries = get_cached_entries();
-    let last_hash = get_last_hash();
-    serde_json::json!({
-        "valid": valid,
-        "entry_count": entries.len(),
-        "last_hash": last_hash,
-        "last_entry": entries.last().map(|e| e.timestamp.clone())
-    })
 }
 
 // ============================================

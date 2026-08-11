@@ -537,12 +537,18 @@ pub fn get_system_restore_status() -> String {
                 .args(["-NoProfile", "-Command", "Get-Service srservice | Select-Object -ExpandProperty Status"])
                 .output() {
                 let status = String::from_utf8_lossy(&o2.stdout).trim().to_string();
-                if status == "Running" { 
-                    return "ON".to_string(); 
+                if status == "Running" {
+                    return "ON".to_string();
                 }
                 // Service exists but not running
                 return "OFF".to_string();
             }
+        } else {
+            // FIX: Service is confirmed absent - report "not available" directly
+            // instead of falling through to the restore-point count below, which
+            // returns a successful (non-error) "OFF" for count=0 and would
+            // wrongly score a genuinely-unsupported feature as a real compromise.
+            return "ERROR_SR_DETECTION_FAILED_NOT_FOUND".into();
         }
     }
     

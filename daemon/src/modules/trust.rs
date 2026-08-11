@@ -14,7 +14,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 
-const DATA_DIR: &str = "C:\\ProgramData\\Invisibly";
 const TRUST_FILE: &str = "C:\\ProgramData\\Invisibly\\trust.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

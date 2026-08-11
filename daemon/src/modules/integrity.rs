@@ -111,13 +111,6 @@ impl IntegrityWeights {
         }
         Self::default()
     }
-
-    pub fn save(&self) {
-        let path = format!("{}\\weights.json", DATA_DIR);
-        if let Ok(json) = serde_json::to_string_pretty(self) {
-            let _ = fs::write(&path, json);
-        }
-    }
 }
 
 // ============================================

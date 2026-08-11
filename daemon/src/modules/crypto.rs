@@ -114,19 +114,3 @@ pub fn encrypt_consent(data: &str) -> Vec<u8> {
     encrypt_data(data.as_bytes(), &key)
 }
 
-pub fn decrypt_consent(encrypted: &[u8]) -> Result<String, String> {
-    let key = get_xor_key();
-    let decrypted = decrypt_data(encrypted, &key)?;
-    String::from_utf8(decrypted).map_err(|_| "Invalid UTF-8".to_string())
-}
-
-pub fn encrypt_event(data: &str) -> Vec<u8> {
-    let key = get_xor_key();
-    encrypt_data(data.as_bytes(), &key)
-}
-
-pub fn decrypt_event(encrypted: &[u8]) -> Result<String, String> {
-    let key = get_xor_key();
-    let decrypted = decrypt_data(encrypted, &key)?;
-    String::from_utf8(decrypted).map_err(|_| "Invalid UTF-8".to_string())
-}
