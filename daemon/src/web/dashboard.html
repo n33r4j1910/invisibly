@@ -446,18 +446,25 @@ async function callApi(endpoint, successMsg) {
     }
 }
 
-// FIX: Remove restart button handler since endpoint doesn't exist yet
-// document.getElementById('btn-restart').addEventListener('click', async () => {
-//     if (confirm('⚠️ Restart the Invisibly service? This will temporarily disconnect the dashboard.')) {
-//         callApi('/restart', 'Service restart initiated');
-//     }
-// });
+// FIX: /restart now exists - daemon exits gracefully, tray relaunches it
+document.getElementById('btn-restart').addEventListener('click', async () => {
+    if (confirm('⚠️ Restart the Invisibly daemon? The dashboard will briefly disconnect (~10s) while it comes back up.')) {
+        callApi('/restart', 'Restarting - back in ~10 seconds');
+    }
+});
 
 document.getElementById('btn-ghost').addEventListener('click', () => callApi('/ghost', 'Ghost Mode enabled'));
 document.getElementById('btn-unghost').addEventListener('click', () => callApi('/unghost', 'Ghost Mode disabled'));
 document.getElementById('btn-repair').addEventListener('click', () => callApi('/repair', 'Auto-repair triggered'));
 document.getElementById('btn-reset').addEventListener('click', () => {
-    if (confirm('⚠️ Reset baseline to current state?')) {
+    // FIX: Show exactly what's about to be accepted as "normal" before resetting,
+    // instead of a blind confirm - a real problem present right now would
+    // otherwise get silently baked into the new baseline.
+    const pending = Array.from(document.querySelectorAll('#deductions-list li strong')).map(el => el.textContent);
+    const msg = pending.length > 0
+        ? `⚠️ Reset baseline to current state?\n\nThis will accept these ${pending.length} currently-flagged item(s) as normal going forward:\n- ${pending.join('\n- ')}\n\nOnly proceed if you recognize all of them.`
+        : '⚠️ Reset baseline to current state? No items are currently flagged.';
+    if (confirm(msg)) {
         callApi('/reset', 'Baseline reset');
     }
 });
@@ -526,8 +533,10 @@ const MANUAL_COMMANDS = [
         '# List keyboard/mouse:     Get-PnpDevice -Class Keyboard,Mouse',
         '# List network adapters:  Get-NetAdapter',
         "# Disable an unrecognized one only, by exact name:  Disable-PnpDevice -InstanceId '<InstanceId from the list above>' -Confirm:$false" ] },
-    { title: 'startup \u2014 review before touching', desc: 'Auto-repair quarantines everything in the Startup folder. To review manually instead:', cmds: [
+    { title: 'startup \u2014 review before touching', desc: 'No longer auto-quarantined - review the Startup folder yourself, then remove/move anything unfamiliar.', cmds: [
         'Get-ChildItem "$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup"' ] },
+    { title: 'fakeext \u2014 review before touching', desc: 'No longer auto-quarantined - lists double-extension files (e.g. invoice.pdf.exe) on your Desktop/Downloads so you can review before removing.', cmds: [
+        'Get-ChildItem "$env:USERPROFILE\\Desktop","$env:USERPROFILE\\Downloads" | Where-Object { $_.Name -match "\\.(pdf|doc|jpg|txt)\\.exe$" -or $_.Name -match "\\.exe\\." }' ] },
 ];
 
 function renderCommands() {

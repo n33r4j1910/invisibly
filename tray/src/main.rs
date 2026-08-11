@@ -3,6 +3,7 @@
 use std::time::Duration;
 use std::process;
 use std::sync::Arc;
+use std::os::windows::process::CommandExt;
 use tray_icon::{TrayIconBuilder, Icon, TrayIcon};
 use tray_icon::menu::{Menu, MenuItem, MenuEvent};
 use serde::Deserialize;
@@ -39,6 +40,21 @@ enum UserEvent {
 }
 
 const API_URL: &str = "http://127.0.0.1:12790";
+const DAEMON_EXE: &str = "C:\\Invisibly\\target\\release\\invisibly-daemon.exe";
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+// FIX: Tray supervises the daemon - if it stops responding, relaunch it
+// instead of waiting for the next logon (Scheduled Task only fires then).
+fn relaunch_daemon() {
+    println!("🔁 Daemon unresponsive - attempting relaunch...");
+    match process::Command::new(DAEMON_EXE)
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+    {
+        Ok(_) => println!("✅ Daemon relaunch triggered"),
+        Err(e) => println!("❌ Failed to relaunch daemon: {}", e),
+    }
+}
 
 fn create_circle_icon(r: u8, g: u8, b: u8) -> Icon {
     let mut pixels = Vec::with_capacity(1024);
@@ -254,9 +270,14 @@ fn main() {
     std::thread::spawn(move || {
         let client = reqwest::blocking::Client::new();
         println!("🔄 Status polling thread started");
+        // FIX: Track consecutive failures so a crashed/hung daemon gets
+        // relaunched automatically, with a cooldown to avoid a spawn storm.
+        let mut consecutive_failures: u32 = 0;
+        let mut last_relaunch: Option<std::time::Instant> = None;
         loop {
             match client.get(API_URL).timeout(Duration::from_secs(2)).send() {
                 Ok(resp) => {
+                    consecutive_failures = 0;
                     match resp.json::<DaemonStatus>() {
                         Ok(status) => {
                             println!("📊 Daemon status: {}", status.trust_state);
@@ -271,6 +292,15 @@ fn main() {
                 Err(e) => {
                     println!("❌ Daemon offline: {}", e);
                     let _ = proxy2.send_event(UserEvent::StatusUpdate(None));
+                    consecutive_failures += 1;
+                    if consecutive_failures >= 3 {
+                        let cooldown_ok = last_relaunch.map_or(true, |t: std::time::Instant| t.elapsed() > Duration::from_secs(30));
+                        if cooldown_ok {
+                            relaunch_daemon();
+                            last_relaunch = Some(std::time::Instant::now());
+                            consecutive_failures = 0;
+                        }
+                    }
                 }
             }
             std::thread::sleep(Duration::from_secs(3));
