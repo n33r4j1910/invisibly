@@ -2,10 +2,15 @@
 // This software is proprietary and confidential.
 
 //! Auto-Repair Module — Silent with Safety Levels
-//! - Automatic: DNS, Firewall, Proxy, Defender, UAC, Windows Update, System Restore, SmartScreen, IPv6, RDP
+//! - Automatic: Proxy, Defender, UAC, Windows Update, System Restore, SmartScreen, IPv6, RDP
 //! - Alert Only: VPN, DoH, LAPS, Event Log
-//! - Confirm Required: HID, BT, Adapter, Startup, Brute Force
+//! - Confirm Required: DNS, Firewall, HID, BT, Adapter, Startup, Brute Force
 //! - Never Auto (Quarantine): Fake Extensions
+//!
+//! FIX: DNS and Firewall were "automatic" but a plain baseline != current check
+//! can't tell real tampering from a legitimate network change (new Wi-Fi, VPN,
+//! DHCP-assigned DNS) - gate them like the other confirm-required categories so
+//! the daemon stops silently re-fighting the OS's live network config.
 
 use std::process::Command;
 use std::fs;
@@ -116,7 +121,7 @@ pub fn create_hosts_backup() -> bool {
 // AUTOMATIC REPAIRS (No user input) - ALL RETURN bool
 // ============================================
 
-pub fn reset_dns() -> bool {
+pub fn force_reset_dns() -> bool {
     // FIX: Don't hardcode "Wi-Fi" - target whatever adapter is actually up
     let mut cmd = Command::new("powershell");
     cmd.args(["-NoProfile", "-Command",
@@ -149,7 +154,7 @@ pub fn restore_hosts() -> bool {
     }
 }
 
-pub fn enable_firewall() -> bool {
+pub fn force_enable_firewall() -> bool {
     let mut cmd = Command::new("powershell");
     cmd.args(["-NoProfile", "-Command", "Set-NetFirewallProfile -All -Enabled True"]);
     run_command(&mut cmd, "Firewall", "Re-enabled all profiles")
@@ -222,20 +227,6 @@ pub fn set_wifi_private() -> bool {
     cmd.args(["-NoProfile", "-Command",
         "Set-NetConnectionProfile -NetworkCategory Private"]);
     run_command(&mut cmd, "WiFiProfile", "Set to Private")
-}
-
-pub fn block_ip(ip: &str) -> bool {
-    let mut cmd = Command::new("netsh");
-    cmd.args(["advfirewall", "firewall", "add", "rule",
-               "name=TS-Block-IP", "dir=in", "action=block",
-               &format!("remoteip={}", ip)]);
-    run_command(&mut cmd, "BlockIP", &format!("Blocked IP: {}", ip))
-}
-
-pub fn network_kill() -> bool {
-    let mut cmd = Command::new("netsh");
-    cmd.args(["advfirewall", "set", "allprofiles", "state", "on"]);
-    run_command(&mut cmd, "NetworkKill", "All firewall profiles enabled")
 }
 
 pub fn block_bruteforce_ips() -> bool {
@@ -333,22 +324,6 @@ pub fn delete_fake_files() -> bool {
 }
 
 // ============================================
-// FIX #4: Eject USB with safe escaping
-// ============================================
-
-pub fn eject_usb(device: &str) -> bool {
-    // FIX #4: Use script block with escaped variable instead of direct interpolation
-    let mut cmd = Command::new("powershell");
-    cmd.args([
-        "-NoProfile",
-        "-Command",
-        "& { param([string]$dev); Get-PnpDevice -FriendlyName $dev | Disable-PnpDevice -Confirm:$false }",
-        "-dev", device
-    ]);
-    run_command(&mut cmd, "USB", &format!("Ejected: {}", device))
-}
-
-// ============================================
 // FIX #20: Confirm Required with auto-revert timer
 // ============================================
 
@@ -368,10 +343,45 @@ pub fn disable_hid_devices() -> bool {
     false
 }
 
+/// FIX: dns is documented as "Confirm Required" but was being auto-reset - gate it
+pub fn flag_dns_changed() -> bool {
+    log_repair("DNS", "⚠️ Manual confirmation required - use /confirm endpoint");
+    log_incident("DNS", "ConfirmationRequired", "DNS servers changed - manual approval needed");
+    false
+}
+
+/// FIX: firewall is documented as "Confirm Required" but was being auto-enabled - gate it
+pub fn flag_firewall_changed() -> bool {
+    log_repair("Firewall", "⚠️ Manual confirmation required - use /confirm endpoint");
+    log_incident("Firewall", "ConfirmationRequired", "Firewall profile state changed - manual approval needed");
+    false
+}
+
 /// Disables unknown network adapters with confirmation gate
 pub fn disable_unknown_adapters() -> bool {
     log_repair("Adapter", "⚠️ Manual confirmation required - use /confirm endpoint");
     log_incident("Adapter", "ConfirmationRequired", "Unknown network adapters detected - manual approval needed");
+    false
+}
+
+/// FIX: fakeext is documented as "Never Auto" but was being auto-quarantined - gate it
+pub fn flag_fake_extensions() -> bool {
+    log_repair("FakeExtensions", "⚠️ Manual confirmation required - use /confirm endpoint");
+    log_incident("FakeExtensions", "ConfirmationRequired", "Fake file extensions detected - manual approval needed");
+    false
+}
+
+/// FIX: startup is documented as "Confirm Required" but was being auto-quarantined - gate it
+pub fn flag_startup_changed() -> bool {
+    log_repair("Startup", "⚠️ Manual confirmation required - use /confirm endpoint");
+    log_incident("Startup", "ConfirmationRequired", "Startup entries changed - manual approval needed");
+    false
+}
+
+/// FIX: bruteforce is documented as "Confirm Required" but was being auto-blocked - gate it
+pub fn flag_bruteforce_detected() -> bool {
+    log_repair("BruteForce", "⚠️ Manual confirmation required - use /confirm endpoint");
+    log_incident("BruteForce", "ConfirmationRequired", "Possible brute force detected - manual approval needed");
     false
 }
 
@@ -531,6 +541,12 @@ pub fn alert_credential_guard_off() -> bool {
 // GHOST MODE - RETURN bool
 // ============================================
 
+/// FIX: Ghost Mode used to set DefaultOutboundAction=Block with only a narrow
+/// 443/1194/51820 allow-list - that blocks DNS (port 53) and DHCP outright, so
+/// it broke internet connectivity by design, not just when reverting badly.
+/// Ghost Mode is now INBOUND-ONLY hardening (block risky inbound ports, block
+/// inbound ICMP, hide from network discovery/file sharing, stop discovery
+/// services) - it never touches outbound traffic, so it can't break DNS/browsing.
 pub fn ghost_mode_on() -> bool {
     let mut cmd1 = Command::new("powershell");
     cmd1.args(["-NoProfile", "-Command",
@@ -541,18 +557,19 @@ pub fn ghost_mode_on() -> bool {
 
     let mut cmd2 = Command::new("powershell");
     cmd2.args(["-NoProfile", "-Command",
-        "Set-NetFirewallProfile -All -DefaultInboundAction Block;",
-        "Set-NetFirewallProfile -All -DefaultOutboundAction Block;",
-        "New-NetFirewallRule -DisplayName 'TS-VPN-Only' -Direction Outbound -RemotePort 443,1194,51820 -Protocol TCP,UDP -Action Allow;",
         "New-NetFirewallRule -DisplayName 'TS-Block-ICMP' -Direction Inbound -Protocol ICMPv4 -Action Block;",
         "New-NetFirewallRule -DisplayName 'TS-Block-Mal-Ports' -Direction Inbound -LocalPort 4444,5555,6667,8080,8888,31337,3389,5900,5800,5938,21,23,25,110,143,993,995,3306,5432,1433,1521,27017,6379,11211,5000,4500,5060 -Action Block;",
         "Get-NetFirewallRule -DisplayGroup 'Network Discovery' | Disable-NetFirewallRule;",
         "Get-NetFirewallRule -DisplayGroup 'File and Printer Sharing' | Disable-NetFirewallRule;",
         "Stop-Service -Name 'FDResPub','SSDPSRV','upnphost','bthserv' -Force;",
         "Set-Service -Name 'FDResPub','SSDPSRV','upnphost','bthserv' -StartupType Disabled;"]);
-    let result2 = run_command(&mut cmd2, "GhostMode", "Enabled - Full lockdown active");
-    
-    result1 && result2
+    let result2 = run_command(&mut cmd2, "GhostMode", "Enabled - Inbound hardening active (outbound unaffected)");
+
+    // FIX: Verify the state we actually care about instead of trusting a
+    // multi-statement PowerShell exit code, which can report success even
+    // when an individual statement in the chain silently failed.
+    let verified = verify_ghost_rule_present(true);
+    result1 && result2 && verified
 }
 
 pub fn ghost_mode_off() -> bool {
@@ -563,16 +580,54 @@ pub fn ghost_mode_off() -> bool {
         "Get-NetFirewallRule -DisplayName 'TS-Block-Mal-Ports' -ErrorAction SilentlyContinue | Remove-NetFirewallRule;"]);
     let result1 = run_command(&mut cmd1, "GhostMode", "Removed existing rules");
 
+    // FIX: Always force outbound/inbound defaults back to Windows' standard
+    // Allow/Block regardless of what they currently are - this is a safety
+    // net that cleans up any pre-existing bad state (e.g. from the old
+    // full-lockdown implementation) even though ghost_mode_on() no longer
+    // sets DefaultOutboundAction itself.
     let mut cmd2 = Command::new("powershell");
     cmd2.args(["-NoProfile", "-Command",
-        "Set-NetFirewallProfile -All -DefaultInboundAction Allow;",
+        "Set-NetFirewallProfile -All -DefaultInboundAction Block;",
         "Set-NetFirewallProfile -All -DefaultOutboundAction Allow;",
         "Get-NetFirewallRule -DisplayGroup 'Network Discovery' | Enable-NetFirewallRule;",
         "Get-NetFirewallRule -DisplayGroup 'File and Printer Sharing' | Enable-NetFirewallRule;",
         "Set-Service -Name 'FDResPub','SSDPSRV','upnphost','bthserv' -StartupType Manual;"]);
     let result2 = run_command(&mut cmd2, "GhostMode", "Disabled - Normal operation restored");
-    
-    result1 && result2
+
+    let verified = verify_ghost_rule_present(false);
+    result1 && result2 && verified
+}
+
+/// Re-queries live firewall state to confirm a ghost_mode_on/off call actually
+/// took effect, rather than trusting the PowerShell process exit code alone.
+fn verify_ghost_rule_present(expect_active: bool) -> bool {
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-Command",
+        "(Get-NetFirewallProfile -Name Public).DefaultOutboundAction.ToString();",
+        "(Get-NetFirewallRule -DisplayName 'TS-Block-ICMP' -ErrorAction SilentlyContinue | Measure-Object).Count"]);
+    match cmd.output() {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let lines: Vec<&str> = stdout.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+            let outbound_allowed = lines.first().map(|l| *l == "Allow").unwrap_or(false);
+            let icmp_rule_count: i32 = lines.get(1).and_then(|l| l.parse().ok()).unwrap_or(-1);
+
+            // Outbound must always stay Allow - that invariant holds whether
+            // Ghost Mode is on or off in this inbound-only design.
+            let outbound_ok = outbound_allowed;
+            let icmp_ok = if expect_active { icmp_rule_count >= 1 } else { icmp_rule_count == 0 };
+
+            if !outbound_ok || !icmp_ok {
+                log_repair("GhostMode", &format!("❌ Verification failed: outbound_allowed={} icmp_rule_count={}", outbound_allowed, icmp_rule_count));
+                log_incident("GhostMode", "VerificationFailed", "Ghost Mode state did not match expected firewall state after apply");
+            }
+            outbound_ok && icmp_ok
+        }
+        Err(e) => {
+            log_repair("GhostMode", &format!("❌ Verification error: {}", e));
+            false
+        }
+    }
 }
 
 pub fn is_ghost_active() -> bool {

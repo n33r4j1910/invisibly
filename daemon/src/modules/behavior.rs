@@ -13,6 +13,7 @@
 //! - action_type: "manual" (requires manual intervention)
 
 use crate::detect::SystemState;
+use std::collections::HashMap;
 
 /// Detects ALL changes between baseline and current state
 pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<(String, String, String)> {
@@ -22,11 +23,25 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
     // NETWORK CHANGES
     // ============================================
 
-    if baseline.dns_servers != current.dns_servers {
+    // FIX: A DNS diff is expected noise when the network itself changed
+    // (new Wi-Fi, VPN connect/disconnect, different router) - DHCP legitimately
+    // hands out different resolvers on a different network. Only treat it as
+    // a security signal when the network identity is unchanged, so an attacker
+    // altering DNS on the SAME network you were already on still gets caught.
+    let network_identity_changed = baseline.wifi_ssid != current.wifi_ssid
+        || baseline.dhcp_server != current.dhcp_server
+        || baseline.vpn_status != current.vpn_status;
+
+    let mut baseline_dns = baseline.dns_servers.clone();
+    let mut current_dns = current.dns_servers.clone();
+    baseline_dns.sort();
+    current_dns.sort();
+
+    if baseline_dns != current_dns && !network_identity_changed {
         changes.push((
             "dns".to_string(),
-            format!("DNS changed from {:?} to {:?}", baseline.dns_servers, current.dns_servers),
-            "automatic".to_string()
+            format!("DNS changed from {:?} to {:?} while network unchanged (SSID '{}')", baseline_dns, current_dns, current.wifi_ssid),
+            "confirm".to_string()
         ));
     }
 
@@ -82,11 +97,33 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
     // WINDOWS SECURITY CHANGES
     // ============================================
 
-    if baseline.firewall_profiles != current.firewall_profiles {
+    // FIX: Only flag firewall as tampered if a profile that was protecting
+    // you got turned OFF - not on every diff. Windows re-evaluates which
+    // profile (Domain/Private/Public) applies per network, and profile
+    // ordering/formatting can vary, so a plain != produced false positives
+    // that had nothing to do with an actual security regression.
+    let parse_fw_profiles = |profiles: &[String]| -> HashMap<String, bool> {
+        profiles.iter().filter_map(|p| {
+            let mut parts = p.splitn(2, ':');
+            let name = parts.next()?.trim().to_string();
+            let state = parts.next()?.trim();
+            Some((name, state == "ON"))
+        }).collect()
+    };
+
+    let baseline_fw = parse_fw_profiles(&baseline.firewall_profiles);
+    let current_fw = parse_fw_profiles(&current.firewall_profiles);
+
+    let weakened_profiles: Vec<String> = baseline_fw.iter()
+        .filter(|(name, &was_on)| was_on && current_fw.get(*name) == Some(&false))
+        .map(|(name, _)| name.clone())
+        .collect();
+
+    if !weakened_profiles.is_empty() {
         changes.push((
             "firewall".to_string(),
-            format!("Firewall changed: {:?}", current.firewall_profiles),
-            "automatic".to_string()
+            format!("Firewall profile(s) disabled: {:?} (current: {:?})", weakened_profiles, current.firewall_profiles),
+            "confirm".to_string()
         ));
     }
 

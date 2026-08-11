@@ -150,7 +150,7 @@ fn run_daemon() {
     }
 
     println!("🛡️ Invisibly - Autonomous Endpoint Security");
-    println!("📡 Detects 38 signals - Auto-repairs - Integrity Score");
+    println!("📡 Detects 34 signals - Auto-repairs - Integrity Score");
     println!("");
 
     // Initialize timeline and verify chain
@@ -188,6 +188,57 @@ fn run_daemon() {
                 eprintln!("❌ API server thread died unexpectedly!");
                 eprintln!("   Attempting to restart...");
                 std::process::exit(1);
+            }
+        }
+    });
+
+    // FIX: 30-second tamper-detection heartbeat. Self-integrity (exe hash) and
+    // baseline signature previously only got re-checked once at startup and
+    // once per 5-minute scan cycle - a tampered exe or baseline could go
+    // undetected for up to 5 minutes. This catches it within 30 seconds.
+    std::thread::spawn(|| {
+        loop {
+            std::thread::sleep(Duration::from_secs(30));
+            let self_ok = check_self_integrity();
+            let baseline_ok = baseline::verify_baseline().valid;
+            if !self_ok || !baseline_ok {
+                println!("🚨 30s heartbeat: integrity check FAILED (self: {}, baseline: {})", self_ok, baseline_ok);
+                if !self_ok {
+                    log_self_integrity_failure();
+                }
+                let is_lockdown = repair::is_ghost_active();
+                let report = integrity::calculate(&[], is_lockdown, false);
+                server::set_integrity_report(report);
+            }
+
+            // FIX: Auto-Ghost-Mode on public WiFi. Runs on this fast 30s cycle
+            // rather than the 5-minute scan loop, so exposure on a new public
+            // network is capped at ~30s instead of up to 5 minutes. Only
+            // auto-exits Ghost Mode if THIS mechanism turned it on - a manual
+            // enable via the dashboard is never auto-disabled.
+            let ghost_auto_flag = format!("{}\\ghost_auto.flag", DATA_DIR);
+            let is_public = detect::get_wifi_profile_status() == "PUBLIC";
+            let ghost_active = repair::is_ghost_active();
+            let ghost_was_auto = std::path::Path::new(&ghost_auto_flag).exists();
+
+            if is_public && !ghost_active {
+                println!("🔵 Public WiFi detected - auto-enabling Ghost Mode (inbound hardening)");
+                if repair::ghost_mode_on() {
+                    let ghost_flag = format!("{}\\ghost.flag", DATA_DIR);
+                    let _ = fs::write(&ghost_flag, "1");
+                    let _ = fs::write(&ghost_auto_flag, "1");
+                    server::set_ghost_active(true);
+                    server::set_trust_state("Ghost");
+                }
+            } else if !is_public && ghost_active && ghost_was_auto {
+                println!("🔵 Back on a trusted network - auto-disabling Ghost Mode");
+                if repair::ghost_mode_off() {
+                    let ghost_flag = format!("{}\\ghost.flag", DATA_DIR);
+                    let _ = fs::remove_file(&ghost_flag);
+                    let _ = fs::remove_file(&ghost_auto_flag);
+                    server::set_ghost_active(false);
+                    server::set_trust_state("Trusted");
+                }
             }
         }
     });
@@ -233,6 +284,12 @@ fn run_daemon() {
     loop {
         std::thread::sleep(Duration::from_secs(300)); // 5 minutes
 
+        // FIX: Honor the "Disable Invisibly" toggle - previously this flag
+        // only changed the displayed label, the scan/repair loop ignored it.
+        if !server::is_ts2_enabled() {
+            continue;
+        }
+
         // ============================================
         // FIX 2 & 4: RELOAD BASELINE AT START OF EACH LOOP
         // ============================================
@@ -271,15 +328,13 @@ fn run_daemon() {
         if !issues.is_empty() {
             println!("⚠️ Found {} changes!", issues.len());
 
-            let mut repair_success = true;
-
             // Apply repairs based on category
             for (category, _) in &issues {
                 let success = match category.as_str() {
                     // Automatic repairs
-                    "dns" => repair::reset_dns(),
+                    "dns" => repair::flag_dns_changed(),
                     "hosts" => repair::restore_hosts(),
-                    "firewall" => repair::enable_firewall(),
+                    "firewall" => repair::flag_firewall_changed(),
                     "proxy" => repair::remove_proxy(),
                     "defender" => repair::enable_defender(),
                     "uac" => repair::enable_uac(),
@@ -309,17 +364,16 @@ fn run_daemon() {
                     "homoglyph" => { repair::alert_suspicious_process(); true }
                     "susp_proc" => { repair::alert_suspicious_process(); true }
                     // Quarantine
-                    "fakeext" => repair::delete_fake_files(),
+                    "fakeext" => repair::flag_fake_extensions(),
                     "hid" => repair::disable_hid_devices(),
                     "bt" => repair::disable_bt_devices(),
                     "adapter" => repair::disable_unknown_adapters(),
-                    "startup" => repair::quarantine_startup(),
-                    "bruteforce" => repair::block_bruteforce_ips(),
+                    "startup" => repair::flag_startup_changed(),
+                    "bruteforce" => repair::flag_bruteforce_detected(),
                     _ => true,
                 };
 
                 if !success {
-                    repair_success = false;
                     println!("❌ Repair failed for: {}", category);
                 }
             }

@@ -216,45 +216,50 @@ pub fn rollback_changes() -> String {
         results.push("No hosts backup found".to_string());
     }
 
+    // FIX: Report what actually happened instead of assuming success
+    let ran_ok = |out: std::io::Result<std::process::Output>| -> bool {
+        matches!(out, Ok(o) if o.status.success())
+    };
+
     // 2. Reset firewall to default
-    let _ = std::process::Command::new("powershell")
+    let ok = ran_ok(std::process::Command::new("powershell")
         .args(["-NoProfile", "-Command", "Set-NetFirewallProfile -All -DefaultInboundAction Allow; Set-NetFirewallProfile -All -DefaultOutboundAction Allow"])
-        .output();
-    results.push("Firewall reset to default".to_string());
+        .output());
+    results.push(if ok { "Firewall reset to default".to_string() } else { "Firewall reset FAILED".to_string() });
 
     // 3. Remove proxy
-    let _ = std::process::Command::new("powershell")
+    let ok = ran_ok(std::process::Command::new("powershell")
         .args(["-NoProfile", "-Command",
             "Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -Name ProxyServer -ErrorAction SilentlyContinue; Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -Name ProxyEnable -ErrorAction SilentlyContinue"])
-        .output();
-    results.push("Proxy removed".to_string());
+        .output());
+    results.push(if ok { "Proxy removed".to_string() } else { "Proxy removal FAILED".to_string() });
 
     // 4. Reset DNS to DHCP
     // FIX: Don't hardcode "Wi-Fi" - target whatever adapter is actually up
-    let _ = std::process::Command::new("powershell")
+    let ok = ran_ok(std::process::Command::new("powershell")
         .args(["-NoProfile", "-Command",
             "Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | ForEach-Object { Set-DnsClientServerAddress -InterfaceIndex $_.ifIndex -ResetServerAddresses }"])
-        .output();
-    results.push("DNS reset to DHCP (active adapter)".to_string());
+        .output());
+    results.push(if ok { "DNS reset to DHCP (active adapter)".to_string() } else { "DNS reset FAILED".to_string() });
 
     // 5. Enable Defender
-    let _ = std::process::Command::new("powershell")
+    let ok = ran_ok(std::process::Command::new("powershell")
         .args(["-NoProfile", "-Command", "Set-MpPreference -DisableRealtimeMonitoring $false"])
-        .output();
-    results.push("Defender re-enabled".to_string());
+        .output());
+    results.push(if ok { "Defender re-enabled".to_string() } else { "Defender re-enable FAILED".to_string() });
 
     // 6. Disable Ghost Mode if active
     if is_ghost_active() {
-        let _ = std::process::Command::new("powershell")
+        let ok = ran_ok(std::process::Command::new("powershell")
             .args(["-NoProfile", "-Command",
                 "Get-NetFirewallRule -DisplayName 'TS-VPN-Only' -ErrorAction SilentlyContinue | Remove-NetFirewallRule;",
                 "Get-NetFirewallRule -DisplayName 'TS-Block-ICMP' -ErrorAction SilentlyContinue | Remove-NetFirewallRule;",
                 "Get-NetFirewallRule -DisplayName 'TS-Block-Mal-Ports' -ErrorAction SilentlyContinue | Remove-NetFirewallRule;"])
-            .output();
+            .output());
         set_ghost_active(false);
         let ghost_flag = format!("{}\\ghost.flag", DATA_DIR);
         let _ = fs::remove_file(&ghost_flag);
-        results.push("Ghost Mode disabled".to_string());
+        results.push(if ok { "Ghost Mode disabled".to_string() } else { "Ghost Mode firewall rules FAILED to remove (flag cleared anyway)".to_string() });
     }
 
     results.join("; ")
@@ -422,12 +427,20 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                 if !validate_auth(&headers, token) {
                     unauthorized()
                 } else {
-                    // FIX #10: Delete AND recreate baseline
-                    let baseline_path = format!("{}\\baseline.json", DATA_DIR);
-                    let _ = fs::remove_file(&baseline_path);
+                    // FIX #10: Recreate baseline from current state
                     let state = crate::detect::collect_state();
-                    let _ = baseline::create_baseline(&state);
-                    json_response(200, r#"{"status":"ok","message":"Baseline reset and recreated"}"#)
+                    match baseline::create_baseline(&state) {
+                        Ok(_) => {
+                            // FIX: Refresh the in-memory cache too - otherwise the daemon
+                            // keeps scoring against the OLD baseline (stale deductions)
+                            // until Run Auto-Repair happens to force a reload, or the
+                            // process restarts.
+                            let mut guard = crate::BASELINE.lock().unwrap();
+                            *guard = Some(state);
+                            json_response(200, r#"{"status":"ok","message":"Baseline reset and recreated"}"#)
+                        }
+                        Err(e) => json_response(500, &format!(r#"{{"error":"Failed to create baseline: {}"}}"#, json_escape(&e))),
+                    }
                 }
             }
             ("POST", "/repair") => {
@@ -442,39 +455,34 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                 if !validate_auth(&headers, token) {
                     unauthorized()
                 } else {
-                    json_response(200, r#"{"status":"ok","message":"Sanitize complete"}"#)
+                    let result = run_scan_only();
+                    json_response(200, &format!(r#"{{"status":"ok","message":"{}"}}"#, json_escape(&result)))
                 }
             }
             ("POST", "/ghost") => {
                 if !validate_auth(&headers, token) {
                     unauthorized()
-                } else {
-                    let _ = std::process::Command::new("powershell")
-                        .args(["-NoProfile", "-Command",
-                            "Set-NetFirewallProfile -All -DefaultInboundAction Block;",
-                            "Set-NetFirewallProfile -All -DefaultOutboundAction Block;"])
-                        .output();
+                } else if crate::modules::repair::ghost_mode_on() {
                     set_ghost_active(true);
                     let ghost_flag = format!("{}\\ghost.flag", DATA_DIR);
                     let _ = fs::write(&ghost_flag, "1");
                     set_trust_state("Ghost");
                     json_response(200, r#"{"status":"ok","message":"Ghost Mode enabled"}"#)
+                } else {
+                    json_response(500, r#"{"status":"error","message":"Ghost Mode failed to apply - system state unchanged, check daemon logs"}"#)
                 }
             }
             ("POST", "/unghost") => {
                 if !validate_auth(&headers, token) {
                     unauthorized()
-                } else {
-                    let _ = std::process::Command::new("powershell")
-                        .args(["-NoProfile", "-Command",
-                            "Set-NetFirewallProfile -All -DefaultInboundAction Allow;",
-                            "Set-NetFirewallProfile -All -DefaultOutboundAction Allow;"])
-                        .output();
+                } else if crate::modules::repair::ghost_mode_off() {
                     set_ghost_active(false);
                     let ghost_flag = format!("{}\\ghost.flag", DATA_DIR);
                     let _ = fs::remove_file(&ghost_flag);
                     set_trust_state("Trusted");
                     json_response(200, r#"{"status":"ok","message":"Ghost Mode disabled"}"#)
+                } else {
+                    json_response(500, r#"{"status":"error","message":"Ghost Mode revert failed - firewall state may be inconsistent, retry or check daemon logs"}"#)
                 }
             }
             ("POST", "/home") => {
@@ -512,6 +520,20 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                 } else {
                     let result = rollback_changes();
                     json_response(200, &format!(r#"{{"status":"ok","message":"{}"}}"#, json_escape(&result)))
+                }
+            }
+            ("POST", "/restart") => {
+                if !validate_auth(&headers, token) {
+                    unauthorized()
+                } else {
+                    // FIX: Exit after a short delay so this response reaches the
+                    // browser first. Tray's supervision (relaunch on unresponsive
+                    // daemon) brings it back within seconds.
+                    std::thread::spawn(|| {
+                        std::thread::sleep(Duration::from_millis(500));
+                        std::process::exit(0);
+                    });
+                    json_response(200, r#"{"status":"ok","message":"Restarting - daemon will be back within ~10 seconds"}"#)
                 }
             }
             ("POST", "/verify_trust") => {
@@ -640,9 +662,9 @@ pub fn run_auto_repair() -> String {
 
     for (category, _) in &issues {
         let success = match category.as_str() {
-            "dns" => repair::reset_dns(),
+            "dns" => repair::flag_dns_changed(),
             "hosts" => repair::restore_hosts(),
-            "firewall" => repair::enable_firewall(),
+            "firewall" => repair::flag_firewall_changed(),
             "proxy" => repair::remove_proxy(),
             "defender" => repair::enable_defender(),
             "uac" => repair::enable_uac(),
@@ -669,12 +691,12 @@ pub fn run_auto_repair() -> String {
             "trojan_source" => { repair::clean_unicode_bidi(); true }
             "homoglyph" => { repair::alert_suspicious_process(); true }
             "susp_proc" => { repair::alert_suspicious_process(); true }
-            "fakeext" => repair::delete_fake_files(),
+            "fakeext" => repair::flag_fake_extensions(),
             "hid" => repair::disable_hid_devices(),
             "bt" => repair::disable_bt_devices(),
             "adapter" => repair::disable_unknown_adapters(),
-            "startup" => repair::quarantine_startup(),
-            "bruteforce" => repair::block_bruteforce_ips(),
+            "startup" => repair::flag_startup_changed(),
+            "bruteforce" => repair::flag_bruteforce_detected(),
             _ => true,
         };
 
@@ -746,4 +768,43 @@ pub fn run_auto_repair() -> String {
         "Repaired: {:?} | Alerted (no fix applied - needs manual review): {:?} | Failed: {:?} | New Score: {}",
         repaired, alerted, failed, report.score
     )
+}
+
+// ============================================
+// SCAN ONLY - read-only version of run_auto_repair().
+// Refreshes the report immediately but never changes system state.
+// ============================================
+
+pub fn run_scan_only() -> String {
+    use crate::modules::{detect, behavior, integrity, baseline, repair, trust};
+
+    let baseline_status = baseline::verify_baseline();
+    if !baseline_status.valid {
+        let report = integrity::calculate(&[], false, false);
+        set_integrity_report(report.clone());
+        return "Scanned 34 signals | Baseline INVALID - manual review required".to_string();
+    }
+
+    let baseline_state = match baseline::load_baseline_state() {
+        Ok(s) => s,
+        Err(e) => return format!("Failed to load baseline: {}", e),
+    };
+
+    let current = detect::collect_state();
+    let issues = behavior::detect_all_changes(&baseline_state, &current)
+        .into_iter()
+        .map(|(cat, details, _)| (cat, details))
+        .collect::<Vec<(String, String)>>();
+
+    let is_lockdown = repair::is_ghost_active();
+    let report = integrity::calculate(&issues, is_lockdown, true);
+    set_integrity_report(report.clone());
+    set_trust_level(trust::get_trust_score());
+
+    let categories: Vec<&String> = issues.iter().map(|(cat, _)| cat).collect();
+    if categories.is_empty() {
+        format!("Scanned 34 signals | No issues found | Score: {}", report.score)
+    } else {
+        format!("Scanned 34 signals | {} issue(s) found: {:?} | Score: {}", categories.len(), categories, report.score)
+    }
 }
