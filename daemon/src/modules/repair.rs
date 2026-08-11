@@ -117,9 +117,11 @@ pub fn create_hosts_backup() -> bool {
 // ============================================
 
 pub fn reset_dns() -> bool {
-    let mut cmd = Command::new("netsh");
-    cmd.args(["interface", "ip", "set", "dns", "Wi-Fi", "dhcp"]);
-    run_command(&mut cmd, "DNS", "Reset to DHCP")
+    // FIX: Don't hardcode "Wi-Fi" - target whatever adapter is actually up
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-Command",
+        "Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | ForEach-Object { Set-DnsClientServerAddress -InterfaceIndex $_.ifIndex -ResetServerAddresses }"]);
+    run_command(&mut cmd, "DNS", "Reset to DHCP (active adapter)")
 }
 
 pub fn restore_hosts() -> bool {

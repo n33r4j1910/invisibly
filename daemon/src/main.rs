@@ -33,7 +33,7 @@ const SERVICE_NAME: &str = "InvisiblyDaemon";
 // GLOBAL BASELINE (Shared across threads)
 // ============================================
 
-static BASELINE: once_cell::sync::Lazy<Mutex<Option<detect::SystemState>>> =
+pub static BASELINE: once_cell::sync::Lazy<Mutex<Option<detect::SystemState>>> =
     once_cell::sync::Lazy::new(|| Mutex::new(None));
 
 fn reload_baseline() -> Option<detect::SystemState> {

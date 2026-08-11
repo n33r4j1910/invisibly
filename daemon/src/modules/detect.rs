@@ -156,6 +156,9 @@ pub fn get_arp() -> Vec<String> {
             }
         }
     }
+    // FIX: Sort so a stable ARP cache doesn't register as "changed" just
+    // because the OS returned entries in a different order this time.
+    a.sort();
     // FIX: If detection fails, return ERROR state
     if a.is_empty() { a.push("ERROR_ARP_DETECTION_FAILED".into()); }
     a
@@ -196,6 +199,8 @@ pub fn get_network_devices() -> Vec<String> {
             }
         }
     }
+    // FIX: Sort for the same reason as get_arp() - avoid order-only false diffs
+    d.sort();
     if d.is_empty() { d.push("ERROR_DEVICE_DETECTION_FAILED".into()); }
     d
 }
@@ -519,22 +524,42 @@ pub fn get_windows_update_status() -> String {
     "ERROR_WU_DETECTION_FAILED".into()
 }
 
+// FIX: Properly detect System Restore status
 pub fn get_system_restore_status() -> String {
+    // First check: does the srservice exist?
     if let Ok(o) = Command::new("powershell")
-        .args(["-NoProfile", "-Command", "Get-Service srservice | Select-Object -ExpandProperty Status"])
+        .args(["-NoProfile", "-Command", "Get-Service -Name srservice -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name"])
         .output() {
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-        if s == "Running" { return "ON".to_string(); }
+        if !s.is_empty() && s == "srservice" {
+            // Service exists, check if it's running
+            if let Ok(o2) = Command::new("powershell")
+                .args(["-NoProfile", "-Command", "Get-Service srservice | Select-Object -ExpandProperty Status"])
+                .output() {
+                let status = String::from_utf8_lossy(&o2.stdout).trim().to_string();
+                if status == "Running" { 
+                    return "ON".to_string(); 
+                }
+                // Service exists but not running
+                return "OFF".to_string();
+            }
+        }
     }
+    
+    // Fallback: check if System Restore has restore points
     if let Ok(o) = Command::new("powershell")
-        .args(["-NoProfile", "-Command", "Get-ComputerRestorePoint | Measure-Object | Select-Object -ExpandProperty Count"])
+        .args(["-NoProfile", "-Command", "Get-ComputerRestorePoint -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count"])
         .output() {
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
         if let Ok(count) = s.parse::<i32>() {
             if count > 0 { return "ON".to_string(); }
+            // Count is 0 — service may exist but no restore points
+            return "OFF".to_string();
         }
     }
-    "ERROR_SR_DETECTION_FAILED".into()
+    
+    // Service doesn't exist at all
+    "ERROR_SR_DETECTION_FAILED_NOT_FOUND".into()
 }
 
 pub fn get_event_log_status() -> String {

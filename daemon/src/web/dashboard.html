@@ -82,6 +82,21 @@
         .daemon-status.online { background: #0f3b2a; color: #4cd9a0; }
         .daemon-status.offline { background: #3d0f0f; color: #f55a5a; }
         .daemon-status.starting { background: #3d2f0a; color: #f5c542; }
+
+        /* Manual Commands panel (added - fallback reference if a button doesn't work) */
+        .btn.commands-btn { background: #2a2a0f; border-color: #8a8a2a; color: #e0d050; }
+        .btn.commands-btn:hover { background: #3a3a1a; }
+        .cmd-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; align-items: center; justify-content: center; padding: 20px; }
+        .cmd-overlay.open { display: flex; }
+        .cmd-modal { background: #141a24; border: 1px solid #2a3344; border-radius: 16px; max-width: 900px; width: 100%; max-height: 85vh; overflow-y: auto; padding: 26px; }
+        .cmd-modal h2 { font-size: 20px; margin-bottom: 6px; }
+        .cmd-modal .cmd-note { color: #7b8aa3; font-size: 13px; margin-bottom: 18px; }
+        .cmd-entry { border-left: 3px solid #2a3344; background: #1a212b; border-radius: 8px; padding: 10px 14px; margin-bottom: 10px; }
+        .cmd-entry .cmd-title { font-weight: 600; font-size: 14px; margin-bottom: 2px; }
+        .cmd-entry .cmd-desc { color: #7b8aa3; font-size: 12px; margin-bottom: 6px; }
+        .cmd-entry .cmd-warn { color: #f5c542; font-size: 12px; margin-bottom: 6px; }
+        .cmd-entry pre { background: #0b0e14; border: 1px solid #1e2633; border-radius: 6px; padding: 8px 10px; font-family: 'Consolas', monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all; margin: 2px 0; }
+        .cmd-close { position: sticky; top: 0; float: right; }
     </style>
 </head>
 <body>
@@ -142,6 +157,7 @@
         <button class="btn danger" id="btn-rollback">↩️ Rollback Changes</button>
         <button class="btn verify-btn" id="btn-verify">✅ Verify Trust</button>
         <button class="btn restart-btn" id="btn-restart">🔄 Restart Service</button>
+        <button class="btn commands-btn" id="btn-commands">🖥️ Manual Commands</button>
     </div>
 
     <div class="controls-title">🔘 Status</div>
@@ -165,6 +181,15 @@
     <div class="footer">
         <span>🔒 127.0.0.1:12790 · Offline Only · Silent Mode</span>
         <span><a id="refresh-link">↻ Refresh</a></span>
+    </div>
+</div>
+
+<div class="cmd-overlay" id="cmd-overlay">
+    <div class="cmd-modal">
+        <button class="btn cmd-close" id="btn-commands-close">✖ Close</button>
+        <h2>🖥️ Manual Commands</h2>
+        <div class="cmd-note">If a button above isn't working, here is the exact command it runs. Open PowerShell <strong>as Administrator</strong> and paste the relevant one. These are reference-only — copy exactly what applies to your situation.</div>
+        <div id="cmd-list"></div>
     </div>
 </div>
 
@@ -447,6 +472,108 @@ document.getElementById('btn-verify').addEventListener('click', () => callApi('/
 document.getElementById('btn-enable').addEventListener('click', () => callApi('/enable', 'Invisibly enabled'));
 document.getElementById('btn-disable').addEventListener('click', () => callApi('/disable', 'Invisibly disabled'));
 document.getElementById('refresh-link').addEventListener('click', (e) => { e.preventDefault(); refresh(); });
+
+// Manual Commands panel (added - fallback reference, run in an Admin PowerShell)
+// Mirrors the exact commands each button/repair runs, sourced from repair.rs / server.rs.
+const MANUAL_COMMANDS = [
+    { title: 'Run Auto-Repair \u2192 dns', desc: 'Reset DNS to DHCP on the active adapter.', cmds: [
+        "Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | ForEach-Object { Set-DnsClientServerAddress -InterfaceIndex $_.ifIndex -ResetServerAddresses }" ] },
+    { title: 'Run Auto-Repair \u2192 hosts', desc: 'Restore the hosts file from Invisibly\'s backup copy.', cmds: [
+        'Copy-Item "C:\\ProgramData\\Invisibly\\hosts.backup" "C:\\Windows\\System32\\drivers\\etc\\hosts" -Force' ] },
+    { title: 'Run Auto-Repair \u2192 firewall', desc: 'Re-enable all Windows Firewall profiles.', cmds: [
+        'Set-NetFirewallProfile -All -Enabled True' ] },
+    { title: 'Run Auto-Repair \u2192 proxy', desc: 'Remove any configured proxy.', cmds: [
+        "Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -Name ProxyServer -ErrorAction SilentlyContinue",
+        "Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -Name ProxyEnable -ErrorAction SilentlyContinue",
+        "Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -Name ProxyEnable -Value 0" ] },
+    { title: 'Run Auto-Repair \u2192 defender', desc: 'Re-enable Windows Defender real-time protection.', cmds: [
+        'Set-MpPreference -DisableRealtimeMonitoring $false' ] },
+    { title: 'Run Auto-Repair \u2192 uac', desc: 'Re-enable User Account Control (requires reboot to fully apply).', cmds: [
+        "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' -Name EnableLUA -Value 1" ] },
+    { title: 'Run Auto-Repair \u2192 wu (Windows Update)', desc: 'Re-enable and start the Windows Update service.', cmds: [
+        'Set-Service -Name wuauserv -StartupType Automatic -Status Running' ] },
+    { title: 'Run Auto-Repair \u2192 sr (System Restore)', desc: 'Re-enable System Restore on C: and start its service.', cmds: [
+        "Enable-ComputerRestore -Drive 'C:\\'",
+        'Set-Service -Name srservice -StartupType Automatic -Status Running' ] },
+    { title: 'Run Auto-Repair \u2192 smartscreen', desc: 'Re-enable SmartScreen.', cmds: [
+        "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer' -Name SmartScreenEnabled -Value 'RequireAdmin'",
+        'Set-MpPreference -EnableSmartScreen $true' ] },
+    { title: 'Run Auto-Repair \u2192 ipv6', desc: 'Re-enable IPv6 on all adapters.', cmds: [
+        "Enable-NetAdapterBinding -Name '*' -ComponentID ms_tcpip6" ] },
+    { title: 'Run Auto-Repair \u2192 wifi_profile', desc: 'Set the current network profile to Private.', cmds: [
+        'Set-NetConnectionProfile -NetworkCategory Private' ] },
+    { title: 'Run Auto-Repair \u2192 rdp', desc: 'Disable Remote Desktop and block port 3389.', cmds: [
+        "Set-Service -Name TermService -StartupType Disabled -Status Stopped",
+        'netsh advfirewall firewall add rule name="TS-Block-RDP" dir=in action=block protocol=TCP localport=3389' ] },
+    { title: 'Run Auto-Repair \u2192 trojan_source', desc: 'Strip invisible/bidi Unicode characters from the hosts file.', cmds: [
+        '$p = "C:\\Windows\\System32\\drivers\\etc\\hosts"; (Get-Content -Raw $p) -replace "[\\u202E\\u202D\\u2066\\u2067\\u2068\\u2069\\u200B\\u200C\\u200D\\u200E\\u200F\\uFEFF\\u202A\\u202B\\u202C\\u00AD]", "" | Set-Content $p' ] },
+    { title: 'Ghost Mode \u2192 Enable', desc: 'Block all inbound/outbound traffic by default.', cmds: [
+        'Set-NetFirewallProfile -All -DefaultInboundAction Block',
+        'Set-NetFirewallProfile -All -DefaultOutboundAction Block' ] },
+    { title: 'Ghost Mode \u2192 Disable', desc: 'Restore normal inbound/outbound firewall defaults.', cmds: [
+        'Set-NetFirewallProfile -All -DefaultInboundAction Allow',
+        'Set-NetFirewallProfile -All -DefaultOutboundAction Allow' ] },
+    { title: 'Rollback Changes (all steps, in order)', desc: 'Restores hosts, firewall, proxy, DNS, Defender and turns off Ghost Mode.', cmds: [
+        'Copy-Item "C:\\ProgramData\\Invisibly\\hosts.backup" "C:\\Windows\\System32\\drivers\\etc\\hosts" -Force',
+        'Set-NetFirewallProfile -All -DefaultInboundAction Allow; Set-NetFirewallProfile -All -DefaultOutboundAction Allow',
+        "Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -Name ProxyServer -ErrorAction SilentlyContinue; Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -Name ProxyEnable -ErrorAction SilentlyContinue",
+        "Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | ForEach-Object { Set-DnsClientServerAddress -InterfaceIndex $_.ifIndex -ResetServerAddresses }",
+        'Set-MpPreference -DisableRealtimeMonitoring $false' ] },
+    { title: 'Brute-force IP block (manual)', desc: 'Blocks source IPs with 5+ failed logons (event 4625) in the last 50 security events.', cmds: [
+        "Get-WinEvent -FilterHashtable @{LogName='Security'; ID=4625} -MaxEvents 50 -ErrorAction SilentlyContinue | ForEach-Object { $_.Properties[19].Value } | Where-Object {$_ -match '\\d+\\.\\d+\\.\\d+\\.\\d+'} | Group-Object | Where-Object {$_.Count -gt 5} | Select-Object -ExpandProperty Name | ForEach-Object { New-NetFirewallRule -DisplayName ('TS-Block-Brute-' + $_) -Direction Inbound -RemoteAddress $_ -Action Block }" ] },
+    { title: 'hid / bt / adapter \u2014 review before touching', desc: 'These need your confirmation by design and are NOT run automatically. Review the device list first.', warn: '\u26a0\ufe0f Running the disable commands below can cut off your own keyboard/mouse/network adapter. Check the FriendlyName/Name in the listing commands matches something unfamiliar before disabling anything.', cmds: [
+        '# List Bluetooth devices:  Get-PnpDevice -Class Bluetooth',
+        '# List keyboard/mouse:     Get-PnpDevice -Class Keyboard,Mouse',
+        '# List network adapters:  Get-NetAdapter',
+        "# Disable an unrecognized one only, by exact name:  Disable-PnpDevice -InstanceId '<InstanceId from the list above>' -Confirm:$false" ] },
+    { title: 'startup \u2014 review before touching', desc: 'Auto-repair quarantines everything in the Startup folder. To review manually instead:', cmds: [
+        'Get-ChildItem "$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup"' ] },
+];
+
+function renderCommands() {
+    const list = document.getElementById('cmd-list');
+    list.innerHTML = '';
+    MANUAL_COMMANDS.forEach(entry => {
+        const div = document.createElement('div');
+        div.className = 'cmd-entry';
+
+        const title = document.createElement('div');
+        title.className = 'cmd-title';
+        title.textContent = entry.title;
+        div.appendChild(title);
+
+        const desc = document.createElement('div');
+        desc.className = 'cmd-desc';
+        desc.textContent = entry.desc;
+        div.appendChild(desc);
+
+        if (entry.warn) {
+            const warn = document.createElement('div');
+            warn.className = 'cmd-warn';
+            warn.textContent = entry.warn;
+            div.appendChild(warn);
+        }
+
+        entry.cmds.forEach(c => {
+            const pre = document.createElement('pre');
+            pre.textContent = c;
+            div.appendChild(pre);
+        });
+
+        list.appendChild(div);
+    });
+}
+
+document.getElementById('btn-commands').addEventListener('click', () => {
+    renderCommands();
+    document.getElementById('cmd-overlay').classList.add('open');
+});
+document.getElementById('btn-commands-close').addEventListener('click', () => {
+    document.getElementById('cmd-overlay').classList.remove('open');
+});
+document.getElementById('cmd-overlay').addEventListener('click', (e) => {
+    if (e.target.id === 'cmd-overlay') document.getElementById('cmd-overlay').classList.remove('open');
+});
 
 async function init() {
     await fetchToken();

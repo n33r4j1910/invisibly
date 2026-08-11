@@ -519,8 +519,8 @@ fn get_firewall_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("Firewall detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "firewall" && msg.contains("OFF") {
@@ -546,8 +546,8 @@ fn get_defender_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("Defender detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "defender" && msg.contains("OFF") {
@@ -573,8 +573,8 @@ fn get_dns_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("DNS detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "dns" {
@@ -600,8 +600,8 @@ fn get_hosts_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("Hosts detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "hosts" {
@@ -627,8 +627,8 @@ fn get_proxy_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("Proxy detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "proxy" {
@@ -654,8 +654,8 @@ fn get_uac_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("UAC detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "uac" && msg.contains("OFF") {
@@ -681,8 +681,8 @@ fn get_windows_update_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("Windows Update detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "wu" && msg.contains("OFF") {
@@ -707,9 +707,9 @@ fn get_system_restore_status(issues: &[(String, String)]) -> ControlStatus {
         if category == "sr" && msg.starts_with("ERROR_") {
             return ControlStatus {
                 status: Status::Unknown,
-                reason: format!("System Restore detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                reason: "System Restore is not available on this system".to_string(),
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "sr" && msg.contains("OFF") {
@@ -728,15 +728,15 @@ fn get_system_restore_status(issues: &[(String, String)]) -> ControlStatus {
         weight: 0,
     }
 }
-
+    
 fn get_smart_screen_status(issues: &[(String, String)]) -> ControlStatus {
     for (category, msg) in issues {
         if category == "smartscreen" && msg.starts_with("ERROR_") {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("SmartScreen detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "smartscreen" && msg.contains("OFF") {
@@ -762,8 +762,8 @@ fn get_vpn_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("VPN detection failed: {}", msg),
-                severity: Severity::Medium,
-                weight: 6,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "vpn" && msg.contains("DISCONNECTED") {
@@ -789,8 +789,8 @@ fn get_ipv6_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("IPv6 detection failed: {}", msg),
-                severity: Severity::Medium,
-                weight: 6,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "ipv6" && msg.contains("OFF") {
@@ -816,8 +816,8 @@ fn get_wifi_profile_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("WiFi profile detection failed: {}", msg),
-                severity: Severity::Medium,
-                weight: 6,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "wifi_profile" && msg.contains("PUBLIC") {
@@ -843,8 +843,8 @@ fn get_doh_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("DoH detection failed: {}", msg),
-                severity: Severity::Medium,
-                weight: 6,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "doh" && msg.contains("OFF") {
@@ -870,8 +870,8 @@ fn get_laps_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("LAPS detection failed: {}", msg),
-                severity: Severity::Medium,
-                weight: 6,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "laps" && msg.contains("DISABLED") {
@@ -897,8 +897,8 @@ fn get_secure_boot_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("Secure Boot detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "secureboot" && msg.contains("OFF") {
@@ -924,8 +924,8 @@ fn get_startup_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("Startup detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "startup" {
@@ -951,8 +951,8 @@ fn get_services_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("Services detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "services" {
@@ -978,8 +978,8 @@ fn get_devices_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("Devices detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "devices" {
@@ -1005,8 +1005,8 @@ fn get_dhcp_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("DHCP detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "dhcp" {
@@ -1032,8 +1032,8 @@ fn get_bitlocker_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("BitLocker detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "bitlocker" && msg.contains("OFF") {
@@ -1059,8 +1059,8 @@ fn get_credential_guard_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("Credential Guard detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "credguard" && msg.contains("OFF") {
@@ -1086,8 +1086,8 @@ fn get_rdp_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("RDP detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "rdp" && (msg.contains("LISTENING") || msg.contains("RUNNING")) {
@@ -1117,8 +1117,8 @@ fn get_bruteforce_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("Brute force detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "bruteforce" && msg.contains("HIGH") {
@@ -1144,8 +1144,8 @@ fn get_trojan_source_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("Trojan source detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "trojan_source" {
@@ -1171,8 +1171,8 @@ fn get_hid_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("HID detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "hid" {
@@ -1198,8 +1198,8 @@ fn get_bt_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("Bluetooth detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "bt" {
@@ -1225,8 +1225,8 @@ fn get_fakeext_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("Fake extension detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "fakeext" {
@@ -1252,8 +1252,8 @@ fn get_bloatware_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("Bloatware detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "bloatware" {
@@ -1279,8 +1279,8 @@ fn get_adapter_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("Adapter detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "adapter" {
@@ -1306,8 +1306,8 @@ fn get_tasks_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("Tasks detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "tasks" {
@@ -1333,8 +1333,8 @@ fn get_wifi_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("WiFi detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "wifi" {
@@ -1360,16 +1360,19 @@ fn get_arp_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("ARP detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "arp" {
+            // FIX: ARP cache churns constantly during normal network use
+            // (device wake/sleep, lease renewal) - it's a weak signal on
+            // its own, not equivalent to a real compromised control.
             return ControlStatus {
                 status: Status::Warning,
                 reason: "ARP table changed (possible spoofing)".to_string(),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::Low,
+                weight: 2,
             };
         }
     }
@@ -1387,8 +1390,8 @@ fn get_homoglyph_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("Homoglyph detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "homoglyph" {
@@ -1414,8 +1417,8 @@ fn get_susp_proc_status(issues: &[(String, String)]) -> ControlStatus {
             return ControlStatus {
                 status: Status::Unknown,
                 reason: format!("Suspicious process detection failed: {}", msg),
-                severity: Severity::High,
-                weight: 12,
+                severity: Severity::None,
+                weight: 0,
             };
         }
         if category == "susp_proc" {

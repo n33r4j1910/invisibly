@@ -12,6 +12,7 @@ use std::time::Duration;
 use std::sync::atomic::AtomicPtr;
 
 use crate::modules::integrity::IntegrityReport;
+use crate::BASELINE;
 use crate::modules::trust;
 use crate::modules::config;
 use crate::modules::baseline;
@@ -229,10 +230,12 @@ pub fn rollback_changes() -> String {
     results.push("Proxy removed".to_string());
 
     // 4. Reset DNS to DHCP
-    let _ = std::process::Command::new("netsh")
-        .args(["interface", "ip", "set", "dns", "Wi-Fi", "dhcp"])
+    // FIX: Don't hardcode "Wi-Fi" - target whatever adapter is actually up
+    let _ = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-Command",
+            "Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | ForEach-Object { Set-DnsClientServerAddress -InterfaceIndex $_.ifIndex -ResetServerAddresses }"])
         .output();
-    results.push("DNS reset to DHCP".to_string());
+    results.push("DNS reset to DHCP (active adapter)".to_string());
 
     // 5. Enable Defender
     let _ = std::process::Command::new("powershell")
@@ -600,10 +603,18 @@ fn parse_home_ssid(request: &str) -> String {
 pub fn run_auto_repair() -> String {
     use crate::modules::{detect, behavior, repair, integrity, baseline, trust};
     
+    // FIX: Force reload baseline from disk
     let baseline_state = match baseline::load_baseline_state() {
         Ok(s) => s,
         Err(e) => return format!("Failed to load baseline: {}", e),
     };
+    
+    // FIX: Update global baseline cache
+    {
+        let mut guard = crate::BASELINE.lock().unwrap();
+        *guard = Some(baseline_state.clone());
+    }
+    
     let current = detect::collect_state();
     
     let issues = behavior::detect_all_changes(&baseline_state, &current)
@@ -616,8 +627,17 @@ pub fn run_auto_repair() -> String {
     }
     
     let mut repaired = Vec::new();
+    let mut alerted = Vec::new();
     let mut failed = Vec::new();
-    
+
+    // FIX: These categories only log an alert - they never change system state,
+    // so a "success" here must not be reported as "repaired".
+    let alert_only = [
+        "vpn", "doh", "laps", "eventlog", "dhcp", "bitlocker", "credguard",
+        "secureboot", "bloatware", "arp", "wifi", "devices", "tasks",
+        "services", "homoglyph", "susp_proc",
+    ];
+
     for (category, _) in &issues {
         let success = match category.as_str() {
             "dns" => repair::reset_dns(),
@@ -657,16 +677,63 @@ pub fn run_auto_repair() -> String {
             "bruteforce" => repair::block_bruteforce_ips(),
             _ => true,
         };
-        
-        if success {
-            repaired.push(category.clone());
-        } else {
+
+        if !success {
             failed.push(category.clone());
+        } else if alert_only.contains(&category.as_str()) {
+            alerted.push(category.clone());
+        } else {
+            repaired.push(category.clone());
         }
     }
     
     let current_after = detect::collect_state();
-    let issues_after = behavior::detect_all_changes(&baseline_state, &current_after)
+
+    // FIX: Once a repair is verified to have actually changed system state,
+    // sync the baseline for that field - otherwise the same drift gets
+    // re-flagged (and re-deducted) on every future scan even though it was
+    // genuinely fixed. Only synced for the well-defined "automatic" tier
+    // (see repair.rs module doc) - never for confirm-required/quarantine
+    // categories, so those stay visible for manual review.
+    let rebaseline_safe = [
+        "dns", "hosts", "firewall", "proxy", "defender", "uac", "wu", "sr",
+        "smartscreen", "ipv6", "wifi_profile", "rdp", "trojan_source",
+    ];
+    let mut synced_baseline = baseline_state.clone();
+    let mut did_sync = false;
+    for category in &repaired {
+        if !rebaseline_safe.contains(&category.as_str()) {
+            continue;
+        }
+        did_sync = true;
+        match category.as_str() {
+            "dns" => synced_baseline.dns_servers = current_after.dns_servers.clone(),
+            "hosts" => synced_baseline.hosts_hash = current_after.hosts_hash.clone(),
+            "firewall" => synced_baseline.firewall_profiles = current_after.firewall_profiles.clone(),
+            "proxy" => synced_baseline.proxy_settings = current_after.proxy_settings.clone(),
+            "defender" => synced_baseline.defender_status = current_after.defender_status.clone(),
+            "uac" => synced_baseline.uac_status = current_after.uac_status.clone(),
+            "wu" => synced_baseline.windows_update_status = current_after.windows_update_status.clone(),
+            "sr" => synced_baseline.system_restore_status = current_after.system_restore_status.clone(),
+            "smartscreen" => synced_baseline.smart_screen_status = current_after.smart_screen_status.clone(),
+            "ipv6" => synced_baseline.ipv6_status = current_after.ipv6_status.clone(),
+            "wifi_profile" => synced_baseline.wifi_profile_status = current_after.wifi_profile_status.clone(),
+            "rdp" => synced_baseline.rdp_status = current_after.rdp_status.clone(),
+            "trojan_source" => synced_baseline.unicode_bidi_files = current_after.unicode_bidi_files.clone(),
+            _ => {}
+        }
+    }
+    if did_sync {
+        if baseline::create_baseline(&synced_baseline).is_ok() {
+            let mut guard = crate::BASELINE.lock().unwrap();
+            *guard = Some(synced_baseline.clone());
+        } else {
+            did_sync = false;
+        }
+    }
+    let baseline_for_check = if did_sync { &synced_baseline } else { &baseline_state };
+
+    let issues_after = behavior::detect_all_changes(baseline_for_check, &current_after)
         .into_iter()
         .map(|(cat, details, _)| (cat, details))
         .collect::<Vec<(String, String)>>();
@@ -674,9 +741,9 @@ pub fn run_auto_repair() -> String {
     let report = integrity::calculate(&issues_after, is_lockdown, true);
     set_integrity_report(report.clone());
     set_trust_level(trust::get_trust_score());
-    
+
     format!(
-        "Repaired: {:?} | Failed: {:?} | New Score: {}",
-        repaired, failed, report.score
+        "Repaired: {:?} | Alerted (no fix applied - needs manual review): {:?} | Failed: {:?} | New Score: {}",
+        repaired, alerted, failed, report.score
     )
 }
