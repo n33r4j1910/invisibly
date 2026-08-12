@@ -538,6 +538,81 @@ pub fn alert_credential_guard_off() -> bool {
 }
 
 // ============================================
+// NEW: EXECUTE CONFIRMED REPAIR (for /approve endpoint)
+// ============================================
+
+/// Executes a repair that was previously flagged as "confirm-required"
+/// This is called from the /approve API endpoint after user approval
+pub fn execute_confirmed_repair(category: &str) -> String {
+    match category {
+        "rdp" => {
+            if disable_rdp() {
+                "RDP disabled successfully".to_string()
+            } else {
+                "RDP disable failed - check logs".to_string()
+            }
+        }
+        "dns" => {
+            if force_reset_dns() {
+                "DNS reset to DHCP successfully".to_string()
+            } else {
+                "DNS reset failed - check logs".to_string()
+            }
+        }
+        "firewall" => {
+            if force_enable_firewall() {
+                "Firewall re-enabled successfully".to_string()
+            } else {
+                "Firewall re-enable failed - check logs".to_string()
+            }
+        }
+        "bt" => {
+            if force_disable_bt_devices() {
+                "Bluetooth devices disabled successfully".to_string()
+            } else {
+                "Bluetooth disable failed - check logs".to_string()
+            }
+        }
+        "hid" => {
+            if force_disable_hid_devices() {
+                "HID devices disabled successfully".to_string()
+            } else {
+                "HID disable failed - check logs".to_string()
+            }
+        }
+        "startup" => {
+            if quarantine_startup() {
+                "Startup entries quarantined successfully".to_string()
+            } else {
+                "Startup quarantine failed - check logs".to_string()
+            }
+        }
+        "bruteforce" => {
+            if block_bruteforce_ips() {
+                "Brute force IPs blocked successfully".to_string()
+            } else {
+                "Brute force blocking failed - check logs".to_string()
+            }
+        }
+        "adapter" => {
+            if force_disable_unknown_adapters() {
+                "Unknown adapters disabled successfully".to_string()
+            } else {
+                "Adapter disable failed - check logs".to_string()
+            }
+        }
+        "fakeext" => {
+            if delete_fake_files() {
+                "Fake extensions quarantined successfully".to_string()
+            } else {
+                "Fake extension quarantine failed - check logs".to_string()
+            }
+        }
+        _ => format!("Unknown category: {}", category),
+    }
+}
+
+// ============================================
 // GHOST MODE - RETURN bool
 // ============================================
 

@@ -263,16 +263,53 @@ pub fn get_startup() -> Vec<String> {
     e
 }
 
+// ============================================
+// FIX: FIREWALL DETECTION - Working PowerShell syntax
+// ============================================
+
 pub fn get_firewall() -> Vec<String> {
     let mut p = Vec::new();
+    
+    // FIX: Use the working PowerShell syntax confirmed on target system
     if let Ok(o) = Command::new("powershell")
-        .args(["-NoProfile","-Command","Get-NetFirewallProfile | ForEach-Object {$_.Name+':'+(if ($_.Enabled) { 'ON' } else { 'OFF' })}"])
+        .args([
+            "-NoProfile",
+            "-Command",
+            "Get-NetFirewallProfile | ForEach-Object { $_.Name + ':' + $($(if ($_.Enabled) { 'ON' } else { 'OFF' })) }"
+        ])
         .output() {
-        for l in String::from_utf8_lossy(&o.stdout).lines() {
-            if !l.trim().is_empty() { p.push(l.trim().to_string()); }
+        let output = String::from_utf8_lossy(&o.stdout);
+        for l in output.lines() {
+            let trimmed = l.trim();
+            if !trimmed.is_empty() && trimmed.contains(':') {
+                p.push(trimmed.to_string());
+            }
         }
     }
-    if p.is_empty() { p.push("ERROR_FIREWALL_DETECTION_FAILED".into()); }
+    
+    // Fallback: Alternative method if the first one fails
+    if p.is_empty() {
+        if let Ok(o2) = Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "Get-NetFirewallProfile | ForEach-Object { $_.Name + ':' + @{$true='ON';$false='OFF'}[$_.Enabled] }"
+            ])
+            .output() {
+            let output = String::from_utf8_lossy(&o2.stdout);
+            for l in output.lines() {
+                let trimmed = l.trim();
+                if !trimmed.is_empty() && trimmed.contains(':') {
+                    p.push(trimmed.to_string());
+                }
+            }
+        }
+    }
+    
+    if p.is_empty() {
+        p.push("ERROR_FIREWALL_DETECTION_FAILED".into());
+    }
+    
     p
 }
 
@@ -568,12 +605,38 @@ pub fn get_system_restore_status() -> String {
     "ERROR_SR_DETECTION_FAILED_NOT_FOUND".into()
 }
 
+// ============================================
+// FIX: IMPROVED EVENT LOG DETECTION
+// ============================================
+
 pub fn get_event_log_status() -> String {
+    // First check if the Security log service is running
+    if let Ok(o) = Command::new("powershell")
+        .args(["-NoProfile", "-Command", "Get-Service -Name EventLog -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Status"])
+        .output() {
+        let status = String::from_utf8_lossy(&o.stdout).trim().to_string();
+        if status != "Running" {
+            return format!("ERROR_EVENTLOG_SERVICE_{}", status.to_uppercase());
+        }
+    }
+    
+    // Check if Security log exists and has events
     if let Ok(o) = Command::new("powershell")
         .args(["-NoProfile", "-Command", "Get-WinEvent -LogName Security -MaxEvents 1 -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count"])
         .output() {
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-        if s == "0" { return "EMPTY".to_string(); }
+        if s == "0" { 
+            // Could be empty or cleared - check if log exists
+            if let Ok(o2) = Command::new("powershell")
+                .args(["-NoProfile", "-Command", "Get-WinEvent -ListLog Security -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LogName"])
+                .output() {
+                let log_name = String::from_utf8_lossy(&o2.stdout).trim().to_string();
+                if log_name.is_empty() {
+                    return "ERROR_EVENTLOG_NOT_FOUND".into();
+                }
+            }
+            return "EMPTY".to_string(); 
+        }
         return "OK".to_string();
     }
     "ERROR_EVENTLOG_DETECTION_FAILED".into()
@@ -743,7 +806,6 @@ pub fn get_rdp_status() -> String {
         .args(["-ano", "-p", "TCP"])
         .output() {
         for l in String::from_utf8_lossy(&o.stdout).lines() {
-            // FIX #15: Broader pattern matching for LISTENING
             if l.contains("3389") && (l.contains("LISTENING") || l.contains("LISTEN") || l.contains("ECOUTE") || l.contains("ESCUCHA")) {
                 return "LISTENING".to_string();
             }
@@ -756,80 +818,5 @@ pub fn get_rdp_status() -> String {
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
         if s == "Running" { return "RUNNING".to_string(); }
     }
-    // FIX #15: Return ERROR sentinel on total failure, not "OFF"
     "ERROR_RDP_DETECTION_FAILED".into()
-}
-
-// ============================================
-// THREAT DETECTION FUNCTIONS — FIX #3: Fail-open fixed
-// ============================================
-
-pub fn check_ransomware() -> bool {
-    let canary_dir = std::path::PathBuf::from("C:\\ProgramData\\Invisibly\\canary");
-    if fs::create_dir_all(&canary_dir).is_err() {
-        return false; // If can't create canary dir, assume no ransomware
-    }
-    let files = ["test.docx", "test.pdf", "test.jpg", "test.txt", "test.xlsx"];
-    let mut modified = 0;
-    let now = std::time::SystemTime::now();
-    for f in &files {
-        let p = canary_dir.join(f);
-        if !p.exists() { let _ = fs::write(&p, b"TS_CANARY"); }
-        if let Ok(meta) = fs::metadata(&p) {
-            if let Ok(mt) = meta.modified() {
-                if let Ok(d) = now.duration_since(mt) {
-                    if d.as_secs() < 30 { modified += 1; }
-                }
-            }
-        }
-    }
-    modified >= 5
-}
-
-pub fn detect_port_scan(threshold: usize) -> String {
-    let mut ip_counts: HashMap<String, usize> = HashMap::new();
-    if let Ok(o) = Command::new("netstat").args(["-ano","-p","TCP"]).output() {
-        for l in String::from_utf8_lossy(&o.stdout).lines().skip(4) {
-            // FIX #15: Broader pattern matching for ESTABLISHED
-            if l.contains("ESTABLISHED") || l.contains("ETABLIE") || l.contains("ESTABLECIDA") {
-                let parts: Vec<&str> = l.split_whitespace().collect();
-                if parts.len() >= 3 {
-                    if let Some(ip) = parts[2].rsplitn(2, ':').nth(1) {
-                        if !ip.starts_with("127.") && !ip.starts_with("192.168.") &&
-                           !ip.starts_with("10.") && !ip.starts_with("23.") {
-                            *ip_counts.entry(ip.to_string()).or_insert(0) += 1;
-                        }
-                    }
-                }
-            }
-        }
-    }
-    for (ip, count) in &ip_counts {
-        if *count > threshold { return ip.clone(); }
-    }
-    String::new()
-}
-
-pub fn check_usb() -> String {
-    if let Ok(o) = Command::new("powershell")
-        .args(["-NoProfile","-Command","Get-PnpDevice -Class USB -ErrorAction SilentlyContinue | Where-Object {$_.Status -eq 'OK' -and $_.FriendlyName -match 'storage|flash|drive|mass'} | Select-Object -ExpandProperty FriendlyName"])
-        .output() {
-        let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-        if !s.is_empty() { return s; }
-    }
-    String::new()
-}
-
-// ============================================
-// SANITIZE
-// ============================================
-
-pub fn first_run_sanitize() -> Vec<String> {
-    let mut issues = Vec::new();
-    if get_defender_status() != "ON" { issues.push("DEFENDER_OFF".into()); }
-    if get_firewall().iter().any(|f| f.contains("OFF")) { issues.push("FIREWALL_OFF".into()); }
-    if get_secure_boot() == "OFF" { issues.push("SECURE_BOOT_OFF".into()); }
-    if get_proxy().len() > 1 && get_proxy()[0] != "None" { issues.push("PROXY_SET".into()); }
-    if get_login_failures().contains("HIGH") { issues.push("BRUTE_FORCE".into()); }
-    issues
 }

@@ -7,11 +7,11 @@
          xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
          IgnorableNamespaces="uap mp rescap desktop6 uap5">
   
-  <Identity Name="DeltaIQx.Invisibly" Publisher="CN=DeltaIQx" Version="2.0.0.0" />
+  <Identity Name="NeerajRathod.Invisibly" Publisher="CN=7CC68D44-A8B5-420C-8A13-CEF4F4B26EDB" Version="2.0.0.0" />
   
   <Properties>
     <DisplayName>Invisibly</DisplayName>
-    <PublisherDisplayName>DeltaIQx LLP</PublisherDisplayName>
+    <PublisherDisplayName>Neeraj Rathod</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
     <Description>Autonomous endpoint security agent. Detects 38 threats, auto-repairs 26. 100% offline. No cloud. No telemetry.</Description>
   </Properties>

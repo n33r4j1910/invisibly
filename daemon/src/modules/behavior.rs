@@ -23,14 +23,12 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
     // NETWORK CHANGES
     // ============================================
 
-    // FIX: A DNS diff is expected noise when the network itself changed
-    // (new Wi-Fi, VPN connect/disconnect, different router) - DHCP legitimately
-    // hands out different resolvers on a different network. Only treat it as
-    // a security signal when the network identity is unchanged, so an attacker
-    // altering DNS on the SAME network you were already on still gets caught.
+    // FIX: DNS - Only treat as security signal when network identity is unchanged
+    // Added additional signals for better detection
     let network_identity_changed = baseline.wifi_ssid != current.wifi_ssid
         || baseline.dhcp_server != current.dhcp_server
-        || baseline.vpn_status != current.vpn_status;
+        || baseline.vpn_status != current.vpn_status
+        || baseline.network_adapters != current.network_adapters;
 
     let mut baseline_dns = baseline.dns_servers.clone();
     let mut current_dns = current.dns_servers.clone();
@@ -65,7 +63,7 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
         changes.push((
             "arp".to_string(),
             format!("ARP table changed: {:?}", current.arp_table),
-            "automatic".to_string()
+            "alert".to_string()
         ));
     }
 
@@ -73,7 +71,7 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
         changes.push((
             "wifi".to_string(),
             format!("WiFi changed from '{}' to '{}'", baseline.wifi_ssid, current.wifi_ssid),
-            "automatic".to_string()
+            "alert".to_string()
         ));
     }
 
@@ -94,37 +92,47 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
     }
 
     // ============================================
-    // WINDOWS SECURITY CHANGES
+    // FIREWALL CHANGES - FIX: Robust handling with error detection
     // ============================================
 
-    // FIX: Only flag firewall as tampered if a profile that was protecting
-    // you got turned OFF - not on every diff. Windows re-evaluates which
-    // profile (Domain/Private/Public) applies per network, and profile
-    // ordering/formatting can vary, so a plain != produced false positives
-    // that had nothing to do with an actual security regression.
-    let parse_fw_profiles = |profiles: &[String]| -> HashMap<String, bool> {
-        profiles.iter().filter_map(|p| {
-            let mut parts = p.splitn(2, ':');
-            let name = parts.next()?.trim().to_string();
-            let state = parts.next()?.trim();
-            Some((name, state == "ON"))
-        }).collect()
-    };
+    // FIX: Check if current firewall detection has an error
+    let has_firewall_error = current.firewall_profiles.iter()
+        .any(|p| p.starts_with("ERROR_"));
 
-    let baseline_fw = parse_fw_profiles(&baseline.firewall_profiles);
-    let current_fw = parse_fw_profiles(&current.firewall_profiles);
+    if has_firewall_error {
+        // Skip firewall comparison on detection error to avoid false positives
+        // Don't push any changes
+    } else {
+        let parse_fw_profiles = |profiles: &[String]| -> HashMap<String, bool> {
+            profiles.iter().filter_map(|p| {
+                let mut parts = p.splitn(2, ':');
+                let name = parts.next()?.trim().to_string();
+                let state = parts.next()?.trim().to_lowercase();
+                // Handle multiple variants of "ON"
+                let enabled = state == "on" || state == "true" || state == "enabled" || state == "1";
+                Some((name, enabled))
+            }).collect()
+        };
 
-    let weakened_profiles: Vec<String> = baseline_fw.iter()
-        .filter(|(name, &was_on)| was_on && current_fw.get(*name) == Some(&false))
-        .map(|(name, _)| name.clone())
-        .collect();
+        let baseline_fw = parse_fw_profiles(&baseline.firewall_profiles);
+        let current_fw = parse_fw_profiles(&current.firewall_profiles);
 
-    if !weakened_profiles.is_empty() {
-        changes.push((
-            "firewall".to_string(),
-            format!("Firewall profile(s) disabled: {:?} (current: {:?})", weakened_profiles, current.firewall_profiles),
-            "confirm".to_string()
-        ));
+        // FIX: Only flag profiles that were ON in baseline but are OFF in current
+        let weakened_profiles: Vec<String> = baseline_fw.iter()
+            .filter(|(name, &was_on)| {
+                was_on && current_fw.get(*name) == Some(&false)
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
+
+        if !weakened_profiles.is_empty() {
+            changes.push((
+                "firewall".to_string(),
+                format!("Firewall profile(s) disabled: {:?} (current: {:?})", 
+                        weakened_profiles, current.firewall_profiles),
+                "confirm".to_string()
+            ));
+        }
     }
 
     if baseline.defender_status != current.defender_status {
@@ -287,7 +295,7 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
         changes.push((
             "bruteforce".to_string(),
             current.login_failures.clone(), // Pass raw value
-            "automatic".to_string()
+            "confirm".to_string()
         ));
     }
 
@@ -375,7 +383,7 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
         changes.push((
             "rdp".to_string(),
             current.rdp_status.clone(), // Pass raw value
-            "automatic".to_string()
+            "confirm".to_string()  // FIX: Changed from "automatic" to "confirm"
         ));
     }
 
@@ -391,40 +399,4 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
     }
 
     changes
-}
-
-/// Returns only changes that require automatic repair
-pub fn get_automatic_changes(baseline: &SystemState, current: &SystemState) -> Vec<(String, String)> {
-    detect_all_changes(baseline, current)
-        .into_iter()
-        .filter(|(_, _, action)| action == "automatic")
-        .map(|(cat, details, _)| (cat, details))
-        .collect()
-}
-
-/// Returns only changes that require user confirmation
-pub fn get_confirm_changes(baseline: &SystemState, current: &SystemState) -> Vec<(String, String)> {
-    detect_all_changes(baseline, current)
-        .into_iter()
-        .filter(|(_, _, action)| action == "confirm")
-        .map(|(cat, details, _)| (cat, details))
-        .collect()
-}
-
-/// Returns only changes that are alerts (no repair)
-pub fn get_alert_changes(baseline: &SystemState, current: &SystemState) -> Vec<(String, String)> {
-    detect_all_changes(baseline, current)
-        .into_iter()
-        .filter(|(_, _, action)| action == "alert")
-        .map(|(cat, details, _)| (cat, details))
-        .collect()
-}
-
-/// Returns only changes that require manual intervention
-pub fn get_manual_changes(baseline: &SystemState, current: &SystemState) -> Vec<(String, String)> {
-    detect_all_changes(baseline, current)
-        .into_iter()
-        .filter(|(_, _, action)| action == "manual")
-        .map(|(cat, details, _)| (cat, details))
-        .collect()
 }

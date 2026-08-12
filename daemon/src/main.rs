@@ -3,6 +3,8 @@ use std::fs;
 use std::ffi::OsString;
 use std::process::Command;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::path::Path;
 
 mod modules;
 use modules::detect;
@@ -150,11 +152,17 @@ fn run_daemon() {
     }
 
     println!("🛡️ Invisibly - Autonomous Endpoint Security");
-    println!("📡 Detects 34 signals - Auto-repairs - Integrity Score");
+    println!("📡 Detects 38 signals - Auto-repairs - Integrity Score");
     println!("");
 
     // Initialize timeline and verify chain
-    timeline::init_timeline();
+    let chain_valid = timeline::verify_chain_on_startup();
+    if !chain_valid {
+        println!("🔴 CRITICAL: Timeline chain verification FAILED!");
+        println!("   Timeline may have been tampered with.");
+        // FIX: Deduct trust on chain failure
+        trust::deduct_trust("Timeline chain verification failed", 30);
+    }
 
     // FIX #7: Self-integrity check - alert on mismatch, don't auto-heal
     if !check_self_integrity() {
@@ -163,6 +171,8 @@ fn run_daemon() {
         println!("   This may indicate tampering or an unauthorized update.");
         println!("   ⛔ Auto-repair disabled. Manual verification required.");
         log_self_integrity_failure();
+        // FIX: Deduct trust on self-integrity failure
+        trust::deduct_trust("Self-integrity check failed - executable modified", 40);
     }
 
     // Load initial baseline
@@ -170,7 +180,7 @@ fn run_daemon() {
     let home_ssid = config::load_home_ssid().unwrap_or_else(|| "Unknown".into());
 
     // ============================================
-    // FIX 17: API server with supervisor thread
+    // API server with supervisor thread
     // ============================================
     println!("🔌 Starting API server on port 12790...");
     
@@ -205,39 +215,70 @@ fn run_daemon() {
                 println!("🚨 30s heartbeat: integrity check FAILED (self: {}, baseline: {})", self_ok, baseline_ok);
                 if !self_ok {
                     log_self_integrity_failure();
+                    trust::deduct_trust("Heartbeat: self-integrity failure", 20);
+                }
+                if !baseline_ok {
+                    trust::deduct_trust("Heartbeat: baseline tampered", 25);
                 }
                 let is_lockdown = repair::is_ghost_active();
                 let report = integrity::calculate(&[], is_lockdown, false);
                 server::set_integrity_report(report);
             }
 
-            // FIX: Auto-Ghost-Mode on public WiFi. Runs on this fast 30s cycle
-            // rather than the 5-minute scan loop, so exposure on a new public
-            // network is capped at ~30s instead of up to 5 minutes. Only
-            // auto-exits Ghost Mode if THIS mechanism turned it on - a manual
-            // enable via the dashboard is never auto-disabled.
+            // FIX: Auto-Ghost-Mode on public WiFi with hysteresis
             let ghost_auto_flag = format!("{}\\ghost_auto.flag", DATA_DIR);
+            let ghost_toggle_time = format!("{}\\ghost_last_toggle.txt", DATA_DIR);
             let is_public = detect::get_wifi_profile_status() == "PUBLIC";
             let ghost_active = repair::is_ghost_active();
             let ghost_was_auto = std::path::Path::new(&ghost_auto_flag).exists();
 
-            if is_public && !ghost_active {
-                println!("🔵 Public WiFi detected - auto-enabling Ghost Mode (inbound hardening)");
-                if repair::ghost_mode_on() {
-                    let ghost_flag = format!("{}\\ghost.flag", DATA_DIR);
-                    let _ = fs::write(&ghost_flag, "1");
-                    let _ = fs::write(&ghost_auto_flag, "1");
-                    server::set_ghost_active(true);
-                    server::set_trust_state("Ghost");
+            // FIX: Add debounce - only toggle if 60 seconds have passed since last toggle
+            let mut can_toggle = true;
+            if let Ok(last_toggle_str) = fs::read_to_string(&ghost_toggle_time) {
+                if let Ok(last_toggle) = last_toggle_str.trim().parse::<u64>() {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or(Duration::from_secs(0))
+                        .as_secs();
+                    if now - last_toggle < 60 {
+                        can_toggle = false;
+                    }
                 }
-            } else if !is_public && ghost_active && ghost_was_auto {
-                println!("🔵 Back on a trusted network - auto-disabling Ghost Mode");
-                if repair::ghost_mode_off() {
-                    let ghost_flag = format!("{}\\ghost.flag", DATA_DIR);
-                    let _ = fs::remove_file(&ghost_flag);
-                    let _ = fs::remove_file(&ghost_auto_flag);
-                    server::set_ghost_active(false);
-                    server::set_trust_state("Trusted");
+            }
+
+            if can_toggle {
+                if is_public && !ghost_active {
+                    println!("🔵 Public WiFi detected - auto-enabling Ghost Mode (inbound hardening)");
+                    if repair::ghost_mode_on() {
+                        let ghost_flag = format!("{}\\ghost.flag", DATA_DIR);
+                        let _ = fs::write(&ghost_flag, "1");
+                        let _ = fs::write(&ghost_auto_flag, "1");
+                        let _ = fs::write(&ghost_toggle_time, 
+                            &std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or(Duration::from_secs(0))
+                                .as_secs()
+                                .to_string()
+                        );
+                        server::set_ghost_active(true);
+                        server::set_trust_state("Ghost");
+                    }
+                } else if !is_public && ghost_active && ghost_was_auto {
+                    println!("🔵 Back on a trusted network - auto-disabling Ghost Mode");
+                    if repair::ghost_mode_off() {
+                        let ghost_flag = format!("{}\\ghost.flag", DATA_DIR);
+                        let _ = fs::remove_file(&ghost_flag);
+                        let _ = fs::remove_file(&ghost_auto_flag);
+                        let _ = fs::write(&ghost_toggle_time, 
+                            &std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or(Duration::from_secs(0))
+                                .as_secs()
+                                .to_string()
+                        );
+                        server::set_ghost_active(false);
+                        server::set_trust_state("Trusted");
+                    }
                 }
             }
         }
@@ -256,10 +297,8 @@ fn run_daemon() {
     println!("✅ [1/6] State collected");
 
     println!("🔍 [2/6] Detecting changes...");
-    let issues = behavior::detect_all_changes(&baseline, &current)
-        .into_iter()
-        .map(|(cat, details, _)| (cat, details))
-        .collect::<Vec<(String, String)>>();
+    // FIX: Keep full tuple with action_type
+    let issues = behavior::detect_all_changes(&baseline, &current);
     println!("✅ [2/6] Changes detected: {}", issues.len());
 
     println!("🔍 [3/6] Verifying baseline...");
@@ -271,7 +310,10 @@ fn run_daemon() {
     println!("✅ [4/6] Lockdown: {}", is_lockdown);
 
     println!("🔍 [5/6] Calculating integrity...");
-    let report = integrity::calculate(&issues, is_lockdown, is_baseline_valid);
+    let issues_for_score: Vec<(String, String)> = issues.iter()
+        .map(|(cat, details, _)| (cat.clone(), details.clone()))
+        .collect();
+    let report = integrity::calculate(&issues_for_score, is_lockdown, is_baseline_valid);
     server::set_integrity_report(report.clone());
     server::set_trust_level(trust::get_trust_score());
     println!("📊 [5/6] Initial Integrity Score: {} | Trust Level: {}", report.score, server::get_trust_level());
@@ -282,10 +324,24 @@ fn run_daemon() {
 
     // Main monitoring loop
     loop {
-        std::thread::sleep(Duration::from_secs(300)); // 5 minutes
+        // FIX: Check if daemon is disabled BEFORE sleeping
+        // This allows "Disable Invisibly" to stop the loop immediately
+        while !server::is_ts2_enabled() {
+            std::thread::sleep(Duration::from_millis(100));
+        }
 
-        // FIX: Honor the "Disable Invisibly" toggle - previously this flag
-        // only changed the displayed label, the scan/repair loop ignored it.
+        // FIX: Sleep with interruption - check every second if disabled
+        let mut slept = 0;
+        let total_sleep = Duration::from_secs(300); // 5 minutes
+        while slept < total_sleep.as_secs() {
+            if !server::is_ts2_enabled() {
+                break;
+            }
+            std::thread::sleep(Duration::from_secs(1));
+            slept += 1;
+        }
+
+        // If disabled during sleep, skip this scan cycle
         if !server::is_ts2_enabled() {
             continue;
         }
@@ -308,6 +364,7 @@ fn run_daemon() {
 
         if !is_baseline_valid {
             println!("❌ Baseline integrity check failed!");
+            trust::deduct_trust("Baseline integrity check failed", 25);
             let report = integrity::calculate(&[], false, false);
             server::set_integrity_report(report.clone());
             server::set_trust_level(trust::get_trust_score());
@@ -315,66 +372,61 @@ fn run_daemon() {
         }
 
         // ============================================
-        // 3. DETECT CHANGES (Behavior-Based)
+        // 3. DETECT CHANGES (Behavior-Based) - KEEP ACTION_TYPE
         // ============================================
-        let issues = behavior::detect_all_changes(&baseline, &current)
-            .into_iter()
-            .map(|(cat, details, _)| (cat, details))
-            .collect::<Vec<(String, String)>>();
+        let issues = behavior::detect_all_changes(&baseline, &current);
 
         // ============================================
-        // 4. RISK ASSESSMENT & AUTO-REPAIR
+        // 4. RISK ASSESSMENT & AUTO-REPAIR - USE ACTION_TYPE
         // ============================================
         if !issues.is_empty() {
             println!("⚠️ Found {} changes!", issues.len());
 
-            // Apply repairs based on category
-            for (category, _) in &issues {
-                let success = match category.as_str() {
-                    // Automatic repairs
-                    "dns" => repair::flag_dns_changed(),
-                    "hosts" => repair::restore_hosts(),
-                    "firewall" => repair::flag_firewall_changed(),
-                    "proxy" => repair::remove_proxy(),
-                    "defender" => repair::enable_defender(),
-                    "uac" => repair::enable_uac(),
-                    "wu" => repair::enable_windows_update(),
-                    "sr" => repair::enable_system_restore(),
-                    "smartscreen" => repair::enable_smart_screen(),
-                    "ipv6" => repair::enable_ipv6(),
-                    "wifi_profile" => repair::set_wifi_private(),
-                    "rdp" => repair::disable_rdp(),
-                    // Alert only
-                    "vpn" => { repair::alert_vpn_disconnected(); true }
-                    "doh" => { repair::alert_doh_changed(); true }
-                    "laps" => { repair::alert_laps_changed(); true }
-                    "eventlog" => { repair::alert_event_log_cleared(); true }
-                    "dhcp" => { repair::alert_dhcp_spoofing(); true }
-                    "bitlocker" => { repair::alert_bitlocker_off(); true }
-                    "credguard" => { repair::alert_credential_guard_off(); true }
-                    "secureboot" => { repair::alert_secure_boot(); true }
-                    "bloatware" => { repair::alert_bloatware(); true }
-                    // FIX #8: Added handlers for previously unhandled categories
-                    "arp" => { repair::alert_service_change(); true }
-                    "wifi" => { repair::alert_new_device(); true }
-                    "devices" => { repair::alert_new_device(); true }
-                    "tasks" => { repair::alert_service_change(); true }
-                    "services" => { repair::alert_service_change(); true }
-                    "trojan_source" => { repair::clean_unicode_bidi(); true }
-                    "homoglyph" => { repair::alert_suspicious_process(); true }
-                    "susp_proc" => { repair::alert_suspicious_process(); true }
-                    // Quarantine
-                    "fakeext" => repair::flag_fake_extensions(),
-                    "hid" => repair::disable_hid_devices(),
-                    "bt" => repair::disable_bt_devices(),
-                    "adapter" => repair::disable_unknown_adapters(),
-                    "startup" => repair::flag_startup_changed(),
-                    "bruteforce" => repair::flag_bruteforce_detected(),
-                    _ => true,
-                };
-
-                if !success {
-                    println!("❌ Repair failed for: {}", category);
+            // FIX: Process based on action_type
+            for (category, details, action_type) in &issues {
+                match action_type.as_str() {
+                    "automatic" => {
+                        // Auto-repair for safe categories
+                        let success = match category.as_str() {
+                            "hosts" => repair::restore_hosts(),
+                            "proxy" => repair::remove_proxy(),
+                            "defender" => repair::enable_defender(),
+                            "uac" => repair::enable_uac(),
+                            "wu" => repair::enable_windows_update(),
+                            "sr" => repair::enable_system_restore(),
+                            "smartscreen" => repair::enable_smart_screen(),
+                            "ipv6" => repair::enable_ipv6(),
+                            "wifi_profile" => repair::set_wifi_private(),
+                            "trojan_source" => repair::clean_unicode_bidi(),
+                            _ => true,
+                        };
+                        if !success {
+                            println!("❌ Auto-repair failed for: {}", category);
+                        }
+                    }
+                    "confirm" => {
+                        // Log for confirmation - no auto-repair
+                        println!("⏳ Confirm required for: {} - {}", category, details);
+                        let _ = timeline::add_entry(
+                            category,
+                            "pending_approval",
+                            details,
+                            "awaiting user confirmation",
+                            timeline::RepairResult::AwaitingApproval
+                        );
+                    }
+                    "alert" => {
+                        // Just log - no repair
+                        println!("🔔 Alert: {} - {}", category, details);
+                    }
+                    "manual" => {
+                        // Requires manual intervention
+                        println!("⚠️ Manual intervention required for: {} - {}", category, details);
+                    }
+                    _ => {
+                        // Unknown action_type - log it
+                        println!("⚠️ Unknown action_type '{}' for category: {}", action_type, category);
+                    }
                 }
             }
         }
@@ -384,24 +436,24 @@ fn run_daemon() {
         // ============================================
         let current_after_repair = detect::collect_state();
 
-        // Re-detect issues after repairs (Behavior-Based)
-        let issues_after = behavior::detect_all_changes(&baseline, &current_after_repair)
-            .into_iter()
-            .map(|(cat, details, _)| (cat, details))
-            .collect::<Vec<(String, String)>>();
+        // Re-detect issues after repairs
+        let issues_after = behavior::detect_all_changes(&baseline, &current_after_repair);
 
         // ============================================
         // 6. CALCULATE INTEGRITY SCORE FROM CURRENT STATE
         // ============================================
         let is_lockdown = repair::is_ghost_active();
-        let report = integrity::calculate(&issues_after, is_lockdown, is_baseline_valid);
+        let issues_for_score: Vec<(String, String)> = issues_after.iter()
+            .map(|(cat, details, _)| (cat.clone(), details.clone()))
+            .collect();
+        let report = integrity::calculate(&issues_for_score, is_lockdown, is_baseline_valid);
 
         // Store integrity report
         server::set_integrity_report(report.clone());
 
         // Update trust level if critical issues remain
         if !issues_after.is_empty() {
-            for (category, _) in &issues_after {
+            for (category, _, _) in &issues_after {
                 match category.as_str() {
                     "firewall" | "defender" | "uac" | "wu" | "sr" | "smartscreen" | "secureboot" | "bitlocker" | "credguard" => {
                         trust::deduct_trust(&format!("{} compromised", category), 10);
@@ -422,24 +474,15 @@ fn run_daemon() {
         // ============================================
         // 7. UPDATE TIMELINE
         // ============================================
-        if issues_after.is_empty() {
-            for (category, msg) in &issues {
+        // Log only confirm/alert/manual items, not automatic (already logged by repair module)
+        for (category, details, action_type) in &issues {
+            if action_type == "confirm" || action_type == "alert" || action_type == "manual" {
                 let _ = timeline::add_entry(
                     category,
-                    "repaired",
-                    msg,
-                    "system restored successfully",
-                    timeline::RepairResult::Success
-                );
-            }
-        } else {
-            for (category, msg) in &issues_after {
-                let _ = timeline::add_entry(
-                    category,
-                    "failed",
-                    msg,
-                    "repair failed - manual intervention required",
-                    timeline::RepairResult::Failed
+                    action_type,
+                    details,
+                    "detected",
+                    timeline::RepairResult::AwaitingApproval
                 );
             }
         }

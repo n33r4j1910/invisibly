@@ -100,7 +100,6 @@ impl IntegrityWeights {
         let path = format!("{}\\weights.json", DATA_DIR);
         if let Ok(data) = fs::read_to_string(&path) {
             if let Ok(weights) = serde_json::from_str::<IntegrityWeights>(&data) {
-                // FIX #13: Clamp weights on load to prevent overflow
                 return Self {
                     critical: weights.critical.min(100),
                     high: weights.high.min(100),
@@ -162,6 +161,489 @@ impl Context {
 }
 
 // ============================================
+// CONTROL EVALUATOR DEFINITIONS (TABLE-DRIVEN)
+// ============================================
+
+type EvaluatorFn = fn(&[(String, String)]) -> ControlStatus;
+
+struct ControlEvaluator {
+    category: &'static str,
+    evaluator: EvaluatorFn,
+}
+
+// FIX: Table-driven approach replaces 34 duplicate functions
+fn get_control_evaluators() -> Vec<ControlEvaluator> {
+    vec![
+        ControlEvaluator { category: "firewall", evaluator: evaluate_firewall },
+        ControlEvaluator { category: "defender", evaluator: evaluate_defender },
+        ControlEvaluator { category: "dns", evaluator: evaluate_dns },
+        ControlEvaluator { category: "hosts", evaluator: evaluate_hosts },
+        ControlEvaluator { category: "proxy", evaluator: evaluate_proxy },
+        ControlEvaluator { category: "uac", evaluator: evaluate_uac },
+        ControlEvaluator { category: "wu", evaluator: evaluate_wu },
+        ControlEvaluator { category: "sr", evaluator: evaluate_sr },
+        ControlEvaluator { category: "smartscreen", evaluator: evaluate_smartscreen },
+        ControlEvaluator { category: "vpn", evaluator: evaluate_vpn },
+        ControlEvaluator { category: "ipv6", evaluator: evaluate_ipv6 },
+        ControlEvaluator { category: "wifi_profile", evaluator: evaluate_wifi_profile },
+        ControlEvaluator { category: "doh", evaluator: evaluate_doh },
+        ControlEvaluator { category: "laps", evaluator: evaluate_laps },
+        ControlEvaluator { category: "secureboot", evaluator: evaluate_secureboot },
+        ControlEvaluator { category: "startup", evaluator: evaluate_startup },
+        ControlEvaluator { category: "services", evaluator: evaluate_services },
+        ControlEvaluator { category: "devices", evaluator: evaluate_devices },
+        ControlEvaluator { category: "dhcp", evaluator: evaluate_dhcp },
+        ControlEvaluator { category: "bitlocker", evaluator: evaluate_bitlocker },
+        ControlEvaluator { category: "credguard", evaluator: evaluate_credguard },
+        ControlEvaluator { category: "rdp", evaluator: evaluate_rdp },
+        ControlEvaluator { category: "bruteforce", evaluator: evaluate_bruteforce },
+        ControlEvaluator { category: "trojan_source", evaluator: evaluate_trojan_source },
+        ControlEvaluator { category: "hid", evaluator: evaluate_hid },
+        ControlEvaluator { category: "bt", evaluator: evaluate_bt },
+        ControlEvaluator { category: "fakeext", evaluator: evaluate_fakeext },
+        ControlEvaluator { category: "bloatware", evaluator: evaluate_bloatware },
+        ControlEvaluator { category: "adapter", evaluator: evaluate_adapter },
+        ControlEvaluator { category: "tasks", evaluator: evaluate_tasks },
+        ControlEvaluator { category: "wifi", evaluator: evaluate_wifi },
+        ControlEvaluator { category: "arp", evaluator: evaluate_arp },
+        ControlEvaluator { category: "homoglyph", evaluator: evaluate_homoglyph },
+        ControlEvaluator { category: "susp_proc", evaluator: evaluate_susp_proc },
+    ]
+}
+
+// ============================================
+// GENERIC EVALUATOR HELPERS
+// ============================================
+
+fn find_issue<'a>(issues: &'a [(String, String)], category: &str) -> Option<&'a str> {
+    issues.iter()
+        .find(|(cat, _)| cat == category)
+        .map(|(_, msg)| msg.as_str())
+}
+
+fn is_error(msg: &str) -> bool {
+    msg.starts_with("ERROR_")
+}
+
+fn has_issue(issues: &[(String, String)], category: &str, condition: impl Fn(&str) -> bool) -> bool {
+    find_issue(issues, category)
+        .map(|msg| condition(msg))
+        .unwrap_or(false)
+}
+
+fn healthy_status(reason: &str) -> ControlStatus {
+    ControlStatus {
+        status: Status::Healthy,
+        reason: reason.to_string(),
+        severity: Severity::None,
+        weight: 0,
+    }
+}
+
+fn unknown_status(reason: &str) -> ControlStatus {
+    ControlStatus {
+        status: Status::Unknown,
+        reason: reason.to_string(),
+        severity: Severity::None,
+        weight: 0,
+    }
+}
+
+fn compromised_status(reason: &str, severity: Severity, weight: u8) -> ControlStatus {
+    ControlStatus {
+        status: Status::Compromised,
+        reason: reason.to_string(),
+        severity,
+        weight,
+    }
+}
+
+fn warning_status(reason: &str, severity: Severity, weight: u8) -> ControlStatus {
+    ControlStatus {
+        status: Status::Warning,
+        reason: reason.to_string(),
+        severity,
+        weight,
+    }
+}
+
+// ============================================
+// INDIVIDUAL EVALUATORS
+// ============================================
+
+fn evaluate_firewall(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "firewall") {
+        if is_error(msg) {
+            return unknown_status(&format!("Firewall detection failed: {}", msg));
+        }
+        if msg.contains("OFF") {
+            return compromised_status("Firewall is disabled", Severity::Critical, 20);
+        }
+    }
+    healthy_status("Firewall is enabled")
+}
+
+fn evaluate_defender(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "defender") {
+        if is_error(msg) {
+            return unknown_status(&format!("Defender detection failed: {}", msg));
+        }
+        if msg.contains("OFF") {
+            return compromised_status("Windows Defender is disabled", Severity::Critical, 20);
+        }
+    }
+    healthy_status("Windows Defender is enabled")
+}
+
+fn evaluate_dns(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "dns") {
+        if is_error(msg) {
+            return unknown_status(&format!("DNS detection failed: {}", msg));
+        }
+        return warning_status("DNS configuration changed", Severity::High, 12);
+    }
+    healthy_status("DNS is configured correctly")
+}
+
+fn evaluate_hosts(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "hosts") {
+        if is_error(msg) {
+            return unknown_status(&format!("Hosts detection failed: {}", msg));
+        }
+        return warning_status("Hosts file modified", Severity::High, 12);
+    }
+    healthy_status("Hosts file is intact")
+}
+
+fn evaluate_proxy(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "proxy") {
+        if is_error(msg) {
+            return unknown_status(&format!("Proxy detection failed: {}", msg));
+        }
+        return warning_status("Proxy settings changed", Severity::High, 12);
+    }
+    healthy_status("No proxy detected")
+}
+
+fn evaluate_uac(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "uac") {
+        if is_error(msg) {
+            return unknown_status(&format!("UAC detection failed: {}", msg));
+        }
+        if msg.contains("OFF") {
+            return compromised_status("UAC is disabled", Severity::Critical, 20);
+        }
+    }
+    healthy_status("UAC is enabled")
+}
+
+fn evaluate_wu(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "wu") {
+        if is_error(msg) {
+            return unknown_status(&format!("Windows Update detection failed: {}", msg));
+        }
+        if msg.contains("OFF") {
+            return compromised_status("Windows Update is disabled", Severity::Critical, 20);
+        }
+    }
+    healthy_status("Windows Update is enabled")
+}
+
+fn evaluate_sr(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "sr") {
+        if is_error(msg) {
+            return unknown_status("System Restore is not available on this system");
+        }
+        if msg.contains("OFF") {
+            return compromised_status("System Restore is disabled", Severity::Critical, 20);
+        }
+    }
+    healthy_status("System Restore is enabled")
+}
+
+fn evaluate_smartscreen(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "smartscreen") {
+        if is_error(msg) {
+            return unknown_status(&format!("SmartScreen detection failed: {}", msg));
+        }
+        if msg.contains("OFF") {
+            return compromised_status("SmartScreen is disabled", Severity::Critical, 20);
+        }
+    }
+    healthy_status("SmartScreen is enabled")
+}
+
+fn evaluate_vpn(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "vpn") {
+        if is_error(msg) {
+            return unknown_status(&format!("VPN detection failed: {}", msg));
+        }
+        if msg.contains("DISCONNECTED") {
+            return warning_status("VPN is disconnected", Severity::Low, 2);
+        }
+    }
+    healthy_status("VPN is connected")
+}
+
+fn evaluate_ipv6(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "ipv6") {
+        if is_error(msg) {
+            return unknown_status(&format!("IPv6 detection failed: {}", msg));
+        }
+        if msg.contains("OFF") {
+            return warning_status("IPv6 is disabled", Severity::Low, 2);
+        }
+    }
+    healthy_status("IPv6 is enabled")
+}
+
+fn evaluate_wifi_profile(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "wifi_profile") {
+        if is_error(msg) {
+            return unknown_status(&format!("WiFi profile detection failed: {}", msg));
+        }
+        if msg.contains("PUBLIC") {
+            return warning_status("WiFi profile is set to Public", Severity::Low, 2);
+        }
+    }
+    healthy_status("WiFi profile is Private")
+}
+
+fn evaluate_doh(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "doh") {
+        if is_error(msg) {
+            return unknown_status(&format!("DoH detection failed: {}", msg));
+        }
+        if msg.contains("OFF") {
+            return warning_status("DNS over HTTPS is disabled", Severity::Medium, 6);
+        }
+    }
+    healthy_status("DNS over HTTPS is enabled")
+}
+
+fn evaluate_laps(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "laps") {
+        if is_error(msg) {
+            return unknown_status(&format!("LAPS detection failed: {}", msg));
+        }
+        if msg.contains("DISABLED") {
+            return warning_status("LAPS is disabled", Severity::Medium, 6);
+        }
+    }
+    healthy_status("LAPS is enabled")
+}
+
+fn evaluate_secureboot(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "secureboot") {
+        if is_error(msg) {
+            return unknown_status(&format!("Secure Boot detection failed: {}", msg));
+        }
+        if msg.contains("OFF") {
+            return compromised_status("Secure Boot is disabled", Severity::Critical, 20);
+        }
+    }
+    healthy_status("Secure Boot is enabled")
+}
+
+fn evaluate_startup(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "startup") {
+        if is_error(msg) {
+            return unknown_status(&format!("Startup detection failed: {}", msg));
+        }
+        return warning_status("Startup entries changed", Severity::High, 12);
+    }
+    healthy_status("Startup entries are clean")
+}
+
+fn evaluate_services(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "services") {
+        if is_error(msg) {
+            return unknown_status(&format!("Services detection failed: {}", msg));
+        }
+        return warning_status("Windows Services changed", Severity::Medium, 6);
+    }
+    healthy_status("Windows Services are unchanged")
+}
+
+fn evaluate_devices(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "devices") {
+        if is_error(msg) {
+            return unknown_status(&format!("Devices detection failed: {}", msg));
+        }
+        return warning_status("New network device detected", Severity::Medium, 6);
+    }
+    healthy_status("No unknown network devices")
+}
+
+fn evaluate_dhcp(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "dhcp") {
+        if is_error(msg) {
+            return unknown_status(&format!("DHCP detection failed: {}", msg));
+        }
+        return warning_status("DHCP server changed (possible spoofing)", Severity::High, 12);
+    }
+    healthy_status("DHCP server is consistent")
+}
+
+fn evaluate_bitlocker(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "bitlocker") {
+        if is_error(msg) {
+            return unknown_status(&format!("BitLocker detection failed: {}", msg));
+        }
+        if msg.contains("OFF") {
+            return compromised_status("BitLocker is disabled", Severity::High, 12);
+        }
+    }
+    healthy_status("BitLocker is enabled")
+}
+
+fn evaluate_credguard(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "credguard") {
+        if is_error(msg) {
+            return unknown_status(&format!("Credential Guard detection failed: {}", msg));
+        }
+        if msg.contains("OFF") {
+            return compromised_status("Credential Guard is disabled", Severity::High, 12);
+        }
+    }
+    healthy_status("Credential Guard is enabled")
+}
+
+fn evaluate_rdp(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "rdp") {
+        if is_error(msg) {
+            return unknown_status(&format!("RDP detection failed: {}", msg));
+        }
+        if msg.contains("LISTENING") || msg.contains("RUNNING") {
+            return warning_status("RDP is enabled (port 3389 listening)", Severity::Medium, 6);
+        }
+    }
+    healthy_status("RDP is disabled")
+}
+
+fn evaluate_bruteforce(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "bruteforce") {
+        if is_error(msg) {
+            return unknown_status(&format!("Brute force detection failed: {}", msg));
+        }
+        if msg.contains("HIGH") {
+            return compromised_status("Multiple login failures detected (brute force)", Severity::Critical, 20);
+        }
+    }
+    healthy_status("No brute force attempts detected")
+}
+
+fn evaluate_trojan_source(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "trojan_source") {
+        if is_error(msg) {
+            return unknown_status(&format!("Trojan source detection failed: {}", msg));
+        }
+        return compromised_status("Unicode bidi files detected (trojan source)", Severity::High, 12);
+    }
+    healthy_status("No trojan source files detected")
+}
+
+fn evaluate_hid(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "hid") {
+        if is_error(msg) {
+            return unknown_status(&format!("HID detection failed: {}", msg));
+        }
+        return warning_status("New HID devices detected", Severity::Medium, 6);
+    }
+    healthy_status("No suspicious HID devices")
+}
+
+fn evaluate_bt(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "bt") {
+        if is_error(msg) {
+            return unknown_status(&format!("Bluetooth detection failed: {}", msg));
+        }
+        return warning_status("New Bluetooth devices detected", Severity::Low, 2);
+    }
+    healthy_status("No unknown Bluetooth devices")
+}
+
+fn evaluate_fakeext(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "fakeext") {
+        if is_error(msg) {
+            return unknown_status(&format!("Fake extension detection failed: {}", msg));
+        }
+        return compromised_status("Fake file extensions detected", Severity::High, 12);
+    }
+    healthy_status("No fake file extensions detected")
+}
+
+fn evaluate_bloatware(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "bloatware") {
+        if is_error(msg) {
+            return unknown_status(&format!("Bloatware detection failed: {}", msg));
+        }
+        return warning_status("New software detected (possible bloatware)", Severity::Low, 2);
+    }
+    healthy_status("No bloatware detected")
+}
+
+fn evaluate_adapter(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "adapter") {
+        if is_error(msg) {
+            return unknown_status(&format!("Adapter detection failed: {}", msg));
+        }
+        return warning_status("Network adapters changed", Severity::Medium, 6);
+    }
+    healthy_status("Network adapters are unchanged")
+}
+
+fn evaluate_tasks(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "tasks") {
+        if is_error(msg) {
+            return unknown_status(&format!("Tasks detection failed: {}", msg));
+        }
+        return warning_status("Scheduled tasks changed", Severity::Medium, 6);
+    }
+    healthy_status("Scheduled tasks are unchanged")
+}
+
+fn evaluate_wifi(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "wifi") {
+        if is_error(msg) {
+            return unknown_status(&format!("WiFi detection failed: {}", msg));
+        }
+        return warning_status("WiFi network changed", Severity::Low, 2);
+    }
+    healthy_status("WiFi network is unchanged")
+}
+
+fn evaluate_arp(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "arp") {
+        if is_error(msg) {
+            return unknown_status(&format!("ARP detection failed: {}", msg));
+        }
+        return warning_status("ARP table changed (possible spoofing)", Severity::Low, 2);
+    }
+    healthy_status("ARP table is consistent")
+}
+
+fn evaluate_homoglyph(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "homoglyph") {
+        if is_error(msg) {
+            return unknown_status(&format!("Homoglyph detection failed: {}", msg));
+        }
+        return warning_status("Homoglyph domains detected (typosquatting)", Severity::Medium, 6);
+    }
+    healthy_status("No homoglyph domains detected")
+}
+
+fn evaluate_susp_proc(issues: &[(String, String)]) -> ControlStatus {
+    if let Some(msg) = find_issue(issues, "susp_proc") {
+        if is_error(msg) {
+            return unknown_status(&format!("Suspicious process detection failed: {}", msg));
+        }
+        return warning_status("Suspicious processes detected", Severity::High, 12);
+    }
+    healthy_status("No suspicious processes detected")
+}
+
+// ============================================
 // INTEGRITY SCORE CALCULATOR
 // ============================================
 
@@ -205,283 +687,23 @@ pub fn calculate(
     let mut control_status: HashMap<String, ControlStatus> = HashMap::new();
 
     // ============================================
-    // EVALUATE EACH CONTROL FROM STATE
+    // EVALUATE EACH CONTROL USING TABLE-DRIVEN APPROACH
     // ============================================
-
-    // 1. Firewall
-    let firewall_status = get_firewall_status(issues);
-    control_status.insert("firewall".to_string(), firewall_status.clone());
-    if firewall_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "firewall", &firewall_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 2. Defender
-    let defender_status = get_defender_status(issues);
-    control_status.insert("defender".to_string(), defender_status.clone());
-    if defender_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "defender", &defender_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 3. DNS
-    let dns_status = get_dns_status(issues);
-    control_status.insert("dns".to_string(), dns_status.clone());
-    if dns_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "dns", &dns_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 4. Hosts
-    let hosts_status = get_hosts_status(issues);
-    control_status.insert("hosts".to_string(), hosts_status.clone());
-    if hosts_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "hosts", &hosts_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 5. Proxy
-    let proxy_status = get_proxy_status(issues);
-    control_status.insert("proxy".to_string(), proxy_status.clone());
-    if proxy_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "proxy", &proxy_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 6. UAC
-    let uac_status = get_uac_status(issues);
-    control_status.insert("uac".to_string(), uac_status.clone());
-    if uac_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "uac", &uac_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 7. Windows Update
-    let wu_status = get_windows_update_status(issues);
-    control_status.insert("wu".to_string(), wu_status.clone());
-    if wu_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "wu", &wu_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 8. System Restore
-    let sr_status = get_system_restore_status(issues);
-    control_status.insert("sr".to_string(), sr_status.clone());
-    if sr_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "sr", &sr_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 9. SmartScreen
-    let smartscreen_status = get_smart_screen_status(issues);
-    control_status.insert("smartscreen".to_string(), smartscreen_status.clone());
-    if smartscreen_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "smartscreen", &smartscreen_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 10. VPN
-    let vpn_status = get_vpn_status(issues);
-    control_status.insert("vpn".to_string(), vpn_status.clone());
-    if vpn_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "vpn", &vpn_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 11. IPv6
-    let ipv6_status = get_ipv6_status(issues);
-    control_status.insert("ipv6".to_string(), ipv6_status.clone());
-    if ipv6_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "ipv6", &ipv6_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 12. WiFi Profile
-    let wifi_profile_status = get_wifi_profile_status(issues);
-    control_status.insert("wifi_profile".to_string(), wifi_profile_status.clone());
-    if wifi_profile_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "wifi_profile", &wifi_profile_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 13. DoH
-    let doh_status = get_doh_status(issues);
-    control_status.insert("doh".to_string(), doh_status.clone());
-    if doh_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "doh", &doh_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 14. LAPS
-    let laps_status = get_laps_status(issues);
-    control_status.insert("laps".to_string(), laps_status.clone());
-    if laps_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "laps", &laps_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 15. Secure Boot
-    let secureboot_status = get_secure_boot_status(issues);
-    control_status.insert("secureboot".to_string(), secureboot_status.clone());
-    if secureboot_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "secureboot", &secureboot_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 16. Startup
-    let startup_status = get_startup_status(issues);
-    control_status.insert("startup".to_string(), startup_status.clone());
-    if startup_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "startup", &startup_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 17. Services
-    let services_status = get_services_status(issues);
-    control_status.insert("services".to_string(), services_status.clone());
-    if services_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "services", &services_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 18. Devices
-    let devices_status = get_devices_status(issues);
-    control_status.insert("devices".to_string(), devices_status.clone());
-    if devices_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "devices", &devices_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 19. DHCP
-    let dhcp_status = get_dhcp_status(issues);
-    control_status.insert("dhcp".to_string(), dhcp_status.clone());
-    if dhcp_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "dhcp", &dhcp_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 20. BitLocker
-    let bitlocker_status = get_bitlocker_status(issues);
-    control_status.insert("bitlocker".to_string(), bitlocker_status.clone());
-    if bitlocker_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "bitlocker", &bitlocker_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 21. Credential Guard
-    let credguard_status = get_credential_guard_status(issues);
-    control_status.insert("credguard".to_string(), credguard_status.clone());
-    if credguard_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "credguard", &credguard_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 22. RDP
-    let rdp_status = get_rdp_status(issues);
-    control_status.insert("rdp".to_string(), rdp_status.clone());
-    if rdp_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "rdp", &rdp_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // ============================================
-    // NEW: ADDITIONAL CATEGORY EVALUATORS
-    // ============================================
-
-    // 23. Brute Force
-    let bruteforce_status = get_bruteforce_status(issues);
-    control_status.insert("bruteforce".to_string(), bruteforce_status.clone());
-    if bruteforce_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "bruteforce", &bruteforce_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 24. Trojan Source
-    let trojan_status = get_trojan_source_status(issues);
-    control_status.insert("trojan_source".to_string(), trojan_status.clone());
-    if trojan_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "trojan_source", &trojan_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 25. HID Devices
-    let hid_status = get_hid_status(issues);
-    control_status.insert("hid".to_string(), hid_status.clone());
-    if hid_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "hid", &hid_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 26. Bluetooth Devices
-    let bt_status = get_bt_status(issues);
-    control_status.insert("bt".to_string(), bt_status.clone());
-    if bt_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "bt", &bt_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 27. Fake Extensions
-    let fakeext_status = get_fakeext_status(issues);
-    control_status.insert("fakeext".to_string(), fakeext_status.clone());
-    if fakeext_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "fakeext", &fakeext_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 28. Bloatware
-    let bloatware_status = get_bloatware_status(issues);
-    control_status.insert("bloatware".to_string(), bloatware_status.clone());
-    if bloatware_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "bloatware", &bloatware_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 29. Network Adapters
-    let adapter_status = get_adapter_status(issues);
-    control_status.insert("adapter".to_string(), adapter_status.clone());
-    if adapter_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "adapter", &adapter_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 30. Scheduled Tasks
-    let tasks_status = get_tasks_status(issues);
-    control_status.insert("tasks".to_string(), tasks_status.clone());
-    if tasks_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "tasks", &tasks_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 31. WiFi
-    let wifi_status = get_wifi_status(issues);
-    control_status.insert("wifi".to_string(), wifi_status.clone());
-    if wifi_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "wifi", &wifi_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 32. ARP
-    let arp_status = get_arp_status(issues);
-    control_status.insert("arp".to_string(), arp_status.clone());
-    if arp_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "arp", &arp_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 33. Homoglyph
-    let homoglyph_status = get_homoglyph_status(issues);
-    control_status.insert("homoglyph".to_string(), homoglyph_status.clone());
-    if homoglyph_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "homoglyph", &homoglyph_status, &weights, &context);
-        total_deduction += deduction as u16;
-    }
-
-    // 34. Suspicious Processes
-    let susp_proc_status = get_susp_proc_status(issues);
-    control_status.insert("susp_proc".to_string(), susp_proc_status.clone());
-    if susp_proc_status.status != Status::Healthy {
-        let deduction = apply_deduction(&mut deductions, "susp_proc", &susp_proc_status, &weights, &context);
-        total_deduction += deduction as u16;
+    
+    for evaluator in get_control_evaluators() {
+        let status = (evaluator.evaluator)(issues);
+        control_status.insert(evaluator.category.to_string(), status.clone());
+        
+        if status.status != Status::Healthy && status.status != Status::Unknown {
+            let deduction = apply_deduction(
+                &mut deductions,
+                evaluator.category,
+                &status,
+                &weights,
+                &context,
+            );
+            total_deduction += deduction as u16;
+        }
     }
 
     // Cap deduction at 100
@@ -503,936 +725,7 @@ pub fn calculate(
 }
 
 // ============================================
-// CONTROL STATUS EVALUATORS — FIX: ERROR_* sentinel checks
-// ============================================
-
-fn get_firewall_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "firewall" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("Firewall detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "firewall" && msg.contains("OFF") {
-            return ControlStatus {
-                status: Status::Compromised,
-                reason: "Firewall is disabled".to_string(),
-                severity: Severity::Critical,
-                weight: 20,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "Firewall is enabled".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_defender_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "defender" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("Defender detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "defender" && msg.contains("OFF") {
-            return ControlStatus {
-                status: Status::Compromised,
-                reason: "Windows Defender is disabled".to_string(),
-                severity: Severity::Critical,
-                weight: 20,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "Windows Defender is enabled".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_dns_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "dns" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("DNS detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "dns" {
-            return ControlStatus {
-                status: Status::Warning,
-                reason: "DNS configuration changed".to_string(),
-                severity: Severity::High,
-                weight: 12,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "DNS is configured correctly".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_hosts_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "hosts" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("Hosts detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "hosts" {
-            return ControlStatus {
-                status: Status::Warning,
-                reason: "Hosts file modified".to_string(),
-                severity: Severity::High,
-                weight: 12,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "Hosts file is intact".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_proxy_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "proxy" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("Proxy detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "proxy" {
-            return ControlStatus {
-                status: Status::Warning,
-                reason: "Proxy settings changed".to_string(),
-                severity: Severity::High,
-                weight: 12,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "No proxy detected".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_uac_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "uac" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("UAC detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "uac" && msg.contains("OFF") {
-            return ControlStatus {
-                status: Status::Compromised,
-                reason: "UAC is disabled".to_string(),
-                severity: Severity::Critical,
-                weight: 20,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "UAC is enabled".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_windows_update_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "wu" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("Windows Update detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "wu" && msg.contains("OFF") {
-            return ControlStatus {
-                status: Status::Compromised,
-                reason: "Windows Update is disabled".to_string(),
-                severity: Severity::Critical,
-                weight: 20,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "Windows Update is enabled".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_system_restore_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "sr" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: "System Restore is not available on this system".to_string(),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "sr" && msg.contains("OFF") {
-            return ControlStatus {
-                status: Status::Compromised,
-                reason: "System Restore is disabled".to_string(),
-                severity: Severity::Critical,
-                weight: 20,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "System Restore is enabled".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-    
-fn get_smart_screen_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "smartscreen" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("SmartScreen detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "smartscreen" && msg.contains("OFF") {
-            return ControlStatus {
-                status: Status::Compromised,
-                reason: "SmartScreen is disabled".to_string(),
-                severity: Severity::Critical,
-                weight: 20,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "SmartScreen is enabled".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_vpn_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "vpn" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("VPN detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "vpn" && msg.contains("DISCONNECTED") {
-            return ControlStatus {
-                status: Status::Warning,
-                reason: "VPN is disconnected".to_string(),
-                severity: Severity::Low,
-                weight: 2,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "VPN is connected".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_ipv6_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "ipv6" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("IPv6 detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "ipv6" && msg.contains("OFF") {
-            return ControlStatus {
-                status: Status::Warning,
-                reason: "IPv6 is disabled".to_string(),
-                severity: Severity::Low,
-                weight: 2,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "IPv6 is enabled".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_wifi_profile_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "wifi_profile" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("WiFi profile detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "wifi_profile" && msg.contains("PUBLIC") {
-            return ControlStatus {
-                status: Status::Warning,
-                reason: "WiFi profile is set to Public".to_string(),
-                severity: Severity::Low,
-                weight: 2,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "WiFi profile is Private".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_doh_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "doh" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("DoH detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "doh" && msg.contains("OFF") {
-            return ControlStatus {
-                status: Status::Warning,
-                reason: "DNS over HTTPS is disabled".to_string(),
-                severity: Severity::Medium,
-                weight: 6,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "DNS over HTTPS is enabled".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_laps_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "laps" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("LAPS detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "laps" && msg.contains("DISABLED") {
-            return ControlStatus {
-                status: Status::Warning,
-                reason: "LAPS is disabled".to_string(),
-                severity: Severity::Medium,
-                weight: 6,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "LAPS is enabled".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_secure_boot_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "secureboot" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("Secure Boot detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "secureboot" && msg.contains("OFF") {
-            return ControlStatus {
-                status: Status::Compromised,
-                reason: "Secure Boot is disabled".to_string(),
-                severity: Severity::Critical,
-                weight: 20,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "Secure Boot is enabled".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_startup_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "startup" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("Startup detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "startup" {
-            return ControlStatus {
-                status: Status::Warning,
-                reason: "Startup entries changed".to_string(),
-                severity: Severity::High,
-                weight: 12,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "Startup entries are clean".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_services_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "services" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("Services detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "services" {
-            return ControlStatus {
-                status: Status::Warning,
-                reason: "Windows Services changed".to_string(),
-                severity: Severity::Medium,
-                weight: 6,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "Windows Services are unchanged".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_devices_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "devices" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("Devices detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "devices" {
-            return ControlStatus {
-                status: Status::Warning,
-                reason: "New network device detected".to_string(),
-                severity: Severity::Medium,
-                weight: 6,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "No unknown network devices".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_dhcp_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "dhcp" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("DHCP detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "dhcp" {
-            return ControlStatus {
-                status: Status::Warning,
-                reason: "DHCP server changed (possible spoofing)".to_string(),
-                severity: Severity::High,
-                weight: 12,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "DHCP server is consistent".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_bitlocker_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "bitlocker" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("BitLocker detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "bitlocker" && msg.contains("OFF") {
-            return ControlStatus {
-                status: Status::Compromised,
-                reason: "BitLocker is disabled".to_string(),
-                severity: Severity::High,
-                weight: 12,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "BitLocker is enabled".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_credential_guard_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "credguard" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("Credential Guard detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "credguard" && msg.contains("OFF") {
-            return ControlStatus {
-                status: Status::Compromised,
-                reason: "Credential Guard is disabled".to_string(),
-                severity: Severity::High,
-                weight: 12,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "Credential Guard is enabled".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_rdp_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "rdp" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("RDP detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "rdp" && (msg.contains("LISTENING") || msg.contains("RUNNING")) {
-            return ControlStatus {
-                status: Status::Warning,
-                reason: "RDP is enabled (port 3389 listening)".to_string(),
-                severity: Severity::Medium,
-                weight: 6,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "RDP is disabled".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-// ============================================
-// NEW: ADDITIONAL CONTROL EVALUATORS
-// ============================================
-
-fn get_bruteforce_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "bruteforce" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("Brute force detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "bruteforce" && msg.contains("HIGH") {
-            return ControlStatus {
-                status: Status::Compromised,
-                reason: "Multiple login failures detected (brute force)".to_string(),
-                severity: Severity::Critical,
-                weight: 20,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "No brute force attempts detected".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_trojan_source_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "trojan_source" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("Trojan source detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "trojan_source" {
-            return ControlStatus {
-                status: Status::Compromised,
-                reason: "Unicode bidi files detected (trojan source)".to_string(),
-                severity: Severity::High,
-                weight: 12,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "No trojan source files detected".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_hid_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "hid" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("HID detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "hid" {
-            return ControlStatus {
-                status: Status::Warning,
-                reason: "New HID devices detected".to_string(),
-                severity: Severity::Medium,
-                weight: 6,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "No suspicious HID devices".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_bt_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "bt" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("Bluetooth detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "bt" {
-            return ControlStatus {
-                status: Status::Warning,
-                reason: "New Bluetooth devices detected".to_string(),
-                severity: Severity::Low,
-                weight: 2,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "No unknown Bluetooth devices".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_fakeext_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "fakeext" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("Fake extension detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "fakeext" {
-            return ControlStatus {
-                status: Status::Compromised,
-                reason: "Fake file extensions detected".to_string(),
-                severity: Severity::High,
-                weight: 12,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "No fake file extensions detected".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_bloatware_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "bloatware" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("Bloatware detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "bloatware" {
-            return ControlStatus {
-                status: Status::Warning,
-                reason: "New software detected (possible bloatware)".to_string(),
-                severity: Severity::Low,
-                weight: 2,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "No bloatware detected".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_adapter_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "adapter" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("Adapter detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "adapter" {
-            return ControlStatus {
-                status: Status::Warning,
-                reason: "Network adapters changed".to_string(),
-                severity: Severity::Medium,
-                weight: 6,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "Network adapters are unchanged".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_tasks_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "tasks" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("Tasks detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "tasks" {
-            return ControlStatus {
-                status: Status::Warning,
-                reason: "Scheduled tasks changed".to_string(),
-                severity: Severity::Medium,
-                weight: 6,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "Scheduled tasks are unchanged".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_wifi_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "wifi" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("WiFi detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "wifi" {
-            return ControlStatus {
-                status: Status::Warning,
-                reason: "WiFi network changed".to_string(),
-                severity: Severity::Low,
-                weight: 2,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "WiFi network is unchanged".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_arp_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "arp" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("ARP detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "arp" {
-            // FIX: ARP cache churns constantly during normal network use
-            // (device wake/sleep, lease renewal) - it's a weak signal on
-            // its own, not equivalent to a real compromised control.
-            return ControlStatus {
-                status: Status::Warning,
-                reason: "ARP table changed (possible spoofing)".to_string(),
-                severity: Severity::Low,
-                weight: 2,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "ARP table is consistent".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_homoglyph_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "homoglyph" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("Homoglyph detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "homoglyph" {
-            return ControlStatus {
-                status: Status::Warning,
-                reason: "Homoglyph domains detected (typosquatting)".to_string(),
-                severity: Severity::Medium,
-                weight: 6,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "No homoglyph domains detected".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-fn get_susp_proc_status(issues: &[(String, String)]) -> ControlStatus {
-    for (category, msg) in issues {
-        if category == "susp_proc" && msg.starts_with("ERROR_") {
-            return ControlStatus {
-                status: Status::Unknown,
-                reason: format!("Suspicious process detection failed: {}", msg),
-                severity: Severity::None,
-                weight: 0,
-            };
-        }
-        if category == "susp_proc" {
-            return ControlStatus {
-                status: Status::Warning,
-                reason: "Suspicious processes detected".to_string(),
-                severity: Severity::High,
-                weight: 12,
-            };
-        }
-    }
-    ControlStatus {
-        status: Status::Healthy,
-        reason: "No suspicious processes detected".to_string(),
-        severity: Severity::None,
-        weight: 0,
-    }
-}
-
-// ============================================
-// HELPERS — FIX #11: Weights now used
+// HELPERS
 // ============================================
 
 fn apply_deduction(
@@ -1444,8 +737,6 @@ fn apply_deduction(
 ) -> u8 {
     let multiplier = context.deduction_multiplier(category);
     
-    // FIX #11: Use weights to determine base points based on severity
-    // FIX #13: Use saturating_mul to prevent overflow
     let base_points = match status.severity {
         Severity::Critical => weights.critical,
         Severity::High => weights.high,

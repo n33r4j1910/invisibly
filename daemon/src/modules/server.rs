@@ -10,26 +10,51 @@ use std::sync::{Arc, Mutex};
 use std::path::Path;
 use std::time::Duration;
 use std::sync::atomic::AtomicPtr;
+use std::collections::HashMap;
+use std::sync::atomic::AtomicUsize;
 
 use crate::modules::integrity::IntegrityReport;
 use crate::BASELINE;
 use crate::modules::trust;
 use crate::modules::config;
 use crate::modules::baseline;
+use crate::modules::timeline;
 
 const DATA_DIR: &str = "C:\\ProgramData\\Invisibly";
 const PORT: u16 = 12790;
 const BIND_ADDR: &str = "127.0.0.1";
 const READ_TIMEOUT_SECS: u64 = 10;
+const MAX_CONCURRENT_CONNECTIONS: usize = 10;  // FIX: Rate limiting
+const TOKEN_COUNTER_FILE: &str = "C:\\ProgramData\\Invisibly\\token_counter.txt";
+
+// ============================================
+// CONNECTION COUNTER (Rate Limiting)
+// ============================================
+
+static ACTIVE_CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
+
+fn track_connection<F, T>(f: F) -> T
+where
+    F: FnOnce() -> T,
+{
+    let current = ACTIVE_CONNECTIONS.fetch_add(1, Ordering::SeqCst);
+    if current >= MAX_CONCURRENT_CONNECTIONS {
+        ACTIVE_CONNECTIONS.fetch_sub(1, Ordering::SeqCst);
+        return std::panic::resume_unwind(Box::new("Too many connections"));
+    }
+    let result = f();
+    ACTIVE_CONNECTIONS.fetch_sub(1, Ordering::SeqCst);
+    result
+}
 
 // ============================================
 // TRUST STATE (Legacy)
 // ============================================
 
-static TRUST_STATE: AtomicPtr<&'static str> = AtomicPtr::new("Trusted\0".as_ptr() as *mut _);
+static TRUST_STATE: AtomicPtr<()> = AtomicPtr::new(std::ptr::null_mut());
 
 pub fn set_trust_state(state: &'static str) {
-    let ptr = state.as_ptr() as *mut _;
+    let ptr = state.as_ptr() as *mut ();
     TRUST_STATE.store(ptr, Ordering::Release);
 }
 
@@ -110,18 +135,46 @@ pub fn get_trust_level() -> u8 {
 }
 
 // ============================================
-// TOKEN
+// TOKEN - FIX: Persist rotation counter to disk
 // ============================================
 
 fn get_token() -> String {
     let token_path = format!("{}\\agent.token", DATA_DIR);
-    if let Ok(token) = fs::read_to_string(&token_path) {
-        token.trim().to_string()
-    } else {
-        let token = format!("{:x}", rand::random::<u128>());
-        let _ = fs::write(&token_path, &token);
-        token
+    
+    // Load rotation counter from disk
+    let counter = fs::read_to_string(TOKEN_COUNTER_FILE)
+        .ok()
+        .and_then(|s| s.trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    
+    // FIX: Only rotate on the 100th call, not on process start
+    // Check if counter >= 100 (not just counter % 100 == 0)
+    if counter >= 100 {
+        // Generate new token
+        let new_token = format!("{:x}", rand::random::<u128>()) + &format!("{:x}", rand::random::<u128>());
+        let encrypted = crate::crypto::encrypt_data(new_token.as_bytes(), &crate::crypto::get_xor_key());
+        let _ = fs::write(&token_path, encrypted);
+        let _ = fs::write(TOKEN_COUNTER_FILE, "0");
+        return new_token;
     }
+    
+    // Read existing token
+    if let Ok(encrypted) = fs::read(&token_path) {
+        if let Ok(decrypted) = crate::crypto::decrypt_data(&encrypted, &crate::crypto::get_xor_key()) {
+            if let Ok(token) = String::from_utf8(decrypted) {
+                // Increment counter on disk
+                let _ = fs::write(TOKEN_COUNTER_FILE, &(counter + 1).to_string());
+                return token.trim().to_string();
+            }
+        }
+    }
+    
+    // Generate new token if read fails
+    let new_token = format!("{:x}", rand::random::<u128>()) + &format!("{:x}", rand::random::<u128>());
+    let encrypted = crate::crypto::encrypt_data(new_token.as_bytes(), &crate::crypto::get_xor_key());
+    let _ = fs::write(&token_path, encrypted);
+    let _ = fs::write(TOKEN_COUNTER_FILE, "1");
+    new_token
 }
 
 // ============================================
@@ -161,6 +214,7 @@ fn status_string(code: u16) -> &'static str {
         400 => "400 Bad Request",
         403 => "403 Forbidden",
         404 => "404 Not Found",
+        429 => "429 Too Many Requests",
         500 => "500 Internal Server Error",
         _ => "500 Internal Server Error"
     }
@@ -179,6 +233,10 @@ fn unauthorized() -> String {
     json_response(403, r#"{"error":"Unauthorized - Invalid token"}"#)
 }
 
+fn rate_limited() -> String {
+    json_response(429, r#"{"error":"Too many concurrent connections"}"#)
+}
+
 // ============================================
 // PARSE QUERY PARAM
 // ============================================
@@ -192,6 +250,31 @@ fn parse_query_param(request: &str, param: &str) -> Option<String> {
         let value = request[start..end].trim();
         if !value.is_empty() {
             return Some(value.to_string());
+        }
+    }
+    None
+}
+
+// ============================================
+// PARSE REQUEST BODY (for POST data)
+// ============================================
+
+fn parse_request_body(request: &str, param: &str) -> Option<String> {
+    // Look for JSON body or form data
+    if let Some(body) = request.split("\r\n\r\n").nth(1) {
+        if let Some(pos) = body.find(&format!("\"{}\":\"", param)) {
+            let start = pos + param.len() + 3;
+            if let Some(end) = body[start..].find('"') {
+                return Some(body[start..start + end].to_string());
+            }
+        }
+        // Also try form-urlencoded
+        if let Some(pos) = body.find(&format!("{}=", param)) {
+            let start = pos + param.len() + 1;
+            let end = body[start..].find(&['&', '\n', '\r'][..])
+                .map(|i| start + i)
+                .unwrap_or(body.len());
+            return Some(body[start..end].to_string());
         }
     }
     None
@@ -216,7 +299,6 @@ pub fn rollback_changes() -> String {
         results.push("No hosts backup found".to_string());
     }
 
-    // FIX: Report what actually happened instead of assuming success
     let ran_ok = |out: std::io::Result<std::process::Output>| -> bool {
         matches!(out, Ok(o) if o.status.success())
     };
@@ -235,7 +317,6 @@ pub fn rollback_changes() -> String {
     results.push(if ok { "Proxy removed".to_string() } else { "Proxy removal FAILED".to_string() });
 
     // 4. Reset DNS to DHCP
-    // FIX: Don't hardcode "Wi-Fi" - target whatever adapter is actually up
     let ok = ran_ok(std::process::Command::new("powershell")
         .args(["-NoProfile", "-Command",
             "Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | ForEach-Object { Set-DnsClientServerAddress -InterfaceIndex $_.ifIndex -ResetServerAddresses }"])
@@ -287,8 +368,18 @@ pub fn run() -> std::io::Result<()> {
                 let token_clone = token.clone();
                 let dashboard_clone = dashboard_html.to_string();
                 std::thread::spawn(move || {
-                    handle_connection(stream, &token_clone, &dashboard_clone);
-                });
+    let mut stream = stream;
+    // FIX: Rate limiting - enforce max connections
+    let current = ACTIVE_CONNECTIONS.load(Ordering::SeqCst);
+    if current >= MAX_CONCURRENT_CONNECTIONS {
+        let _ = stream.write_all(rate_limited().as_bytes());
+        let _ = stream.flush();
+        return;
+    }
+    ACTIVE_CONNECTIONS.fetch_add(1, Ordering::SeqCst);
+    handle_connection(stream, &token_clone, &dashboard_clone);
+    ACTIVE_CONNECTIONS.fetch_sub(1, Ordering::SeqCst);
+});
             }
             Err(e) => {
                 eprintln!("Connection error: {}", e);
@@ -334,7 +425,6 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
             return;
         }
 
-        // FIX: Don't require auth for dashboard and token on loopback
         let is_auth_required = !matches!(path.as_str(), "/" | "/dashboard" | "/token");
         
         if is_auth_required && !validate_auth(&headers, token) {
@@ -348,7 +438,6 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
             // GET ENDPOINTS
             // ============================================
             ("GET", "/token") => {
-                // FIX: No auth needed on loopback
                 json_response(200, &format!(r#"{{"token":"{}"}}"#, token))
             }
             ("GET", "/") => {
@@ -371,11 +460,9 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                 ))
             }
             ("GET", "/dashboard") => {
-                // FIX: No auth needed for dashboard on loopback
                 html_response(dashboard_html)
             }
             ("GET", "/status") => {
-                // FIX #5: Auth required
                 if !validate_auth(&headers, token) {
                     unauthorized()
                 } else {
@@ -396,7 +483,6 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                 }
             }
             ("GET", "/timeline") => {
-                // FIX #5: Auth required
                 if !validate_auth(&headers, token) {
                     unauthorized()
                 } else {
@@ -406,7 +492,6 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                 }
             }
             ("GET", "/report") => {
-                // FIX #5: Auth required
                 if !validate_auth(&headers, token) {
                     unauthorized()
                 } else {
@@ -427,14 +512,9 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                 if !validate_auth(&headers, token) {
                     unauthorized()
                 } else {
-                    // FIX #10: Recreate baseline from current state
                     let state = crate::detect::collect_state();
                     match baseline::create_baseline(&state) {
                         Ok(_) => {
-                            // FIX: Refresh the in-memory cache too - otherwise the daemon
-                            // keeps scoring against the OLD baseline (stale deductions)
-                            // until Run Auto-Repair happens to force a reload, or the
-                            // process restarts.
                             let mut guard = crate::BASELINE.lock().unwrap();
                             *guard = Some(state);
                             json_response(200, r#"{"status":"ok","message":"Baseline reset and recreated"}"#)
@@ -526,9 +606,6 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                 if !validate_auth(&headers, token) {
                     unauthorized()
                 } else {
-                    // FIX: Exit after a short delay so this response reaches the
-                    // browser first. Tray's supervision (relaunch on unresponsive
-                    // daemon) brings it back within seconds.
                     std::thread::spawn(|| {
                         std::thread::sleep(Duration::from_millis(500));
                         std::process::exit(0);
@@ -540,7 +617,9 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                 if !validate_auth(&headers, token) {
                     unauthorized()
                 } else {
-                    crate::modules::trust::manual_verify();
+                    // FIX: Wire up manual_verify_with_reason() instead of hardcoded manual_verify()
+                    let reason = parse_request_body(&request, "reason").unwrap_or_else(|| "API request".to_string());
+                    crate::modules::trust::manual_verify_with_reason(&reason, "dashboard-user");
                     let trust_level = get_trust_level();
                     json_response(200, &format!(
                         r#"{{"status":"ok","trust_level":{}}}"#,
@@ -548,13 +627,33 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                     ))
                 }
             }
-            _ => {
-                json_response(404, r#"{"error":"Not found"}"#)
+            // ============================================
+            // NEW: /approve endpoint for confirm-required items
+            // ============================================
+            ("POST", "/approve") => {
+    if !validate_auth(&headers, token) {
+        unauthorized()
+    } else {
+        let category = parse_query_param(&request, "category").unwrap_or_default();
+        if category.is_empty() {
+            json_response(400, r#"{"error":"Category parameter required"}"#)
+        } else {
+            // FIX: Check if this category is actually pending in timeline
+            let pending = check_pending_approval(&category);
+            if !pending {
+                json_response(400, &format!(r#"{{"error":"Category '{}' is not pending approval"}}"#, json_escape(&category)))
+            } else {
+                let result = crate::modules::repair::execute_confirmed_repair(&category);
+                let _ = timeline::add_entry(
+                    &category,
+                    "approved",
+                    "pending_approval",
+                    &result,
+                    timeline::RepairResult::Success
+                );
+                json_response(200, &format!(r#"{{"status":"ok","message":"{}"}}"#, json_escape(&result)))
             }
-        };
-
-        let _ = stream.write_all(response.as_bytes());
-        let _ = stream.flush();
+        }
     }
 }
 
@@ -625,13 +724,11 @@ fn parse_home_ssid(request: &str) -> String {
 pub fn run_auto_repair() -> String {
     use crate::modules::{detect, behavior, repair, integrity, baseline, trust};
     
-    // FIX: Force reload baseline from disk
     let baseline_state = match baseline::load_baseline_state() {
         Ok(s) => s,
         Err(e) => return format!("Failed to load baseline: {}", e),
     };
     
-    // FIX: Update global baseline cache
     {
         let mut guard = crate::BASELINE.lock().unwrap();
         *guard = Some(baseline_state.clone());
@@ -639,10 +736,7 @@ pub fn run_auto_repair() -> String {
     
     let current = detect::collect_state();
     
-    let issues = behavior::detect_all_changes(&baseline_state, &current)
-        .into_iter()
-        .map(|(cat, details, _)| (cat, details))
-        .collect::<Vec<(String, String)>>();
+    let issues = behavior::detect_all_changes(&baseline_state, &current);
     
     if issues.is_empty() {
         return "No changes detected".to_string();
@@ -651,75 +745,86 @@ pub fn run_auto_repair() -> String {
     let mut repaired = Vec::new();
     let mut alerted = Vec::new();
     let mut failed = Vec::new();
+    let mut pending_confirm = Vec::new();
 
-    // FIX: These categories only log an alert - they never change system state,
-    // so a "success" here must not be reported as "repaired".
     let alert_only = [
         "vpn", "doh", "laps", "eventlog", "dhcp", "bitlocker", "credguard",
         "secureboot", "bloatware", "arp", "wifi", "devices", "tasks",
         "services", "homoglyph", "susp_proc",
     ];
 
-    for (category, _) in &issues {
-        let success = match category.as_str() {
-            "dns" => repair::flag_dns_changed(),
-            "hosts" => repair::restore_hosts(),
-            "firewall" => repair::flag_firewall_changed(),
-            "proxy" => repair::remove_proxy(),
-            "defender" => repair::enable_defender(),
-            "uac" => repair::enable_uac(),
-            "wu" => repair::enable_windows_update(),
-            "sr" => repair::enable_system_restore(),
-            "smartscreen" => repair::enable_smart_screen(),
-            "ipv6" => repair::enable_ipv6(),
-            "wifi_profile" => repair::set_wifi_private(),
-            "rdp" => repair::disable_rdp(),
-            "vpn" => { repair::alert_vpn_disconnected(); true }
-            "doh" => { repair::alert_doh_changed(); true }
-            "laps" => { repair::alert_laps_changed(); true }
-            "eventlog" => { repair::alert_event_log_cleared(); true }
-            "dhcp" => { repair::alert_dhcp_spoofing(); true }
-            "bitlocker" => { repair::alert_bitlocker_off(); true }
-            "credguard" => { repair::alert_credential_guard_off(); true }
-            "secureboot" => { repair::alert_secure_boot(); true }
-            "bloatware" => { repair::alert_bloatware(); true }
-            "arp" => { repair::alert_service_change(); true }
-            "wifi" => { repair::alert_new_device(); true }
-            "devices" => { repair::alert_new_device(); true }
-            "tasks" => { repair::alert_service_change(); true }
-            "services" => { repair::alert_service_change(); true }
-            "trojan_source" => { repair::clean_unicode_bidi(); true }
-            "homoglyph" => { repair::alert_suspicious_process(); true }
-            "susp_proc" => { repair::alert_suspicious_process(); true }
-            "fakeext" => repair::flag_fake_extensions(),
-            "hid" => repair::disable_hid_devices(),
-            "bt" => repair::disable_bt_devices(),
-            "adapter" => repair::disable_unknown_adapters(),
-            "startup" => repair::flag_startup_changed(),
-            "bruteforce" => repair::flag_bruteforce_detected(),
-            _ => true,
-        };
-
-        if !success {
-            failed.push(category.clone());
-        } else if alert_only.contains(&category.as_str()) {
-            alerted.push(category.clone());
-        } else {
-            repaired.push(category.clone());
+    // FIX: Process based on action_type
+    for (category, details, action_type) in &issues {
+        match action_type.as_str() {
+            "automatic" => {
+                let success = match category.as_str() {
+                    "dns" => repair::flag_dns_changed(),
+                    "hosts" => repair::restore_hosts(),
+                    "firewall" => repair::flag_firewall_changed(),
+                    "proxy" => repair::remove_proxy(),
+                    "defender" => repair::enable_defender(),
+                    "uac" => repair::enable_uac(),
+                    "wu" => repair::enable_windows_update(),
+                    "sr" => repair::enable_system_restore(),
+                    "smartscreen" => repair::enable_smart_screen(),
+                    "ipv6" => repair::enable_ipv6(),
+                    "wifi_profile" => repair::set_wifi_private(),
+                    "trojan_source" => repair::clean_unicode_bidi(),
+                    _ => true,
+                };
+                if success {
+                    repaired.push(category.clone());
+                } else {
+                    failed.push(category.clone());
+                }
+            }
+            "confirm" => {
+                // No auto-repair - log for confirmation
+                pending_confirm.push(category.clone());
+                let _ = timeline::add_entry(
+                    category,
+                    "pending_approval",
+                    details,
+                    "awaiting user confirmation",
+                    timeline::RepairResult::AwaitingApproval
+                );
+            }
+            "alert" => {
+                alerted.push(category.clone());
+                // Call the alert functions
+                match category.as_str() {
+                    "vpn" => { repair::alert_vpn_disconnected(); }
+                    "doh" => { repair::alert_doh_changed(); }
+                    "laps" => { repair::alert_laps_changed(); }
+                    "eventlog" => { repair::alert_event_log_cleared(); }
+                    "dhcp" => { repair::alert_dhcp_spoofing(); }
+                    "bitlocker" => { repair::alert_bitlocker_off(); }
+                    "credguard" => { repair::alert_credential_guard_off(); }
+                    "secureboot" => { repair::alert_secure_boot(); }
+                    "bloatware" => { repair::alert_bloatware(); }
+                    "arp" => { repair::alert_service_change(); }
+                    "wifi" => { repair::alert_new_device(); }
+                    "devices" => { repair::alert_new_device(); }
+                    "tasks" => { repair::alert_service_change(); }
+                    "services" => { repair::alert_service_change(); }
+                    "homoglyph" => { repair::alert_suspicious_process(); }
+                    "susp_proc" => { repair::alert_suspicious_process(); }
+                    _ => {}
+                }
+            }
+            "manual" => {
+                // Requires manual intervention
+                failed.push(category.clone());
+            }
+            _ => {}
         }
     }
     
     let current_after = detect::collect_state();
 
-    // FIX: Once a repair is verified to have actually changed system state,
-    // sync the baseline for that field - otherwise the same drift gets
-    // re-flagged (and re-deducted) on every future scan even though it was
-    // genuinely fixed. Only synced for the well-defined "automatic" tier
-    // (see repair.rs module doc) - never for confirm-required/quarantine
-    // categories, so those stay visible for manual review.
     let rebaseline_safe = [
-        "dns", "hosts", "firewall", "proxy", "defender", "uac", "wu", "sr",
-        "smartscreen", "ipv6", "wifi_profile", "rdp", "trojan_source",
+        "hosts", "proxy", "defender", "uac", "wu", "sr",
+        "smartscreen", "ipv6", "wifi_profile", "trojan_source",
     ];
     let mut synced_baseline = baseline_state.clone();
     let mut did_sync = false;
@@ -729,9 +834,7 @@ pub fn run_auto_repair() -> String {
         }
         did_sync = true;
         match category.as_str() {
-            "dns" => synced_baseline.dns_servers = current_after.dns_servers.clone(),
             "hosts" => synced_baseline.hosts_hash = current_after.hosts_hash.clone(),
-            "firewall" => synced_baseline.firewall_profiles = current_after.firewall_profiles.clone(),
             "proxy" => synced_baseline.proxy_settings = current_after.proxy_settings.clone(),
             "defender" => synced_baseline.defender_status = current_after.defender_status.clone(),
             "uac" => synced_baseline.uac_status = current_after.uac_status.clone(),
@@ -740,7 +843,6 @@ pub fn run_auto_repair() -> String {
             "smartscreen" => synced_baseline.smart_screen_status = current_after.smart_screen_status.clone(),
             "ipv6" => synced_baseline.ipv6_status = current_after.ipv6_status.clone(),
             "wifi_profile" => synced_baseline.wifi_profile_status = current_after.wifi_profile_status.clone(),
-            "rdp" => synced_baseline.rdp_status = current_after.rdp_status.clone(),
             "trojan_source" => synced_baseline.unicode_bidi_files = current_after.unicode_bidi_files.clone(),
             _ => {}
         }
@@ -755,19 +857,23 @@ pub fn run_auto_repair() -> String {
     }
     let baseline_for_check = if did_sync { &synced_baseline } else { &baseline_state };
 
-    let issues_after = behavior::detect_all_changes(baseline_for_check, &current_after)
-        .into_iter()
-        .map(|(cat, details, _)| (cat, details))
-        .collect::<Vec<(String, String)>>();
+    let issues_after = behavior::detect_all_changes(baseline_for_check, &current_after);
     let is_lockdown = repair::is_ghost_active();
-    let report = integrity::calculate(&issues_after, is_lockdown, true);
+    let issues_for_score: Vec<(String, String)> = issues_after.iter()
+        .map(|(cat, details, _)| (cat.clone(), details.clone()))
+        .collect();
+    let report = integrity::calculate(&issues_for_score, is_lockdown, true);
     set_integrity_report(report.clone());
     set_trust_level(trust::get_trust_score());
 
-    format!(
-        "Repaired: {:?} | Alerted (no fix applied - needs manual review): {:?} | Failed: {:?} | New Score: {}",
-        repaired, alerted, failed, report.score
-    )
+    let mut message = format!(
+        "Repaired: {:?} | Alerted: {:?} | Failed: {:?} | Pending Confirm: {:?} | New Score: {}",
+        repaired, alerted, failed, pending_confirm, report.score
+    );
+    if !pending_confirm.is_empty() {
+        message.push_str(" | ⚠️ Some changes require manual confirmation");
+    }
+    message
 }
 
 // ============================================
@@ -791,20 +897,48 @@ pub fn run_scan_only() -> String {
     };
 
     let current = detect::collect_state();
-    let issues = behavior::detect_all_changes(&baseline_state, &current)
-        .into_iter()
-        .map(|(cat, details, _)| (cat, details))
-        .collect::<Vec<(String, String)>>();
+    let issues = behavior::detect_all_changes(&baseline_state, &current);
+    let issues_for_score: Vec<(String, String)> = issues.iter()
+        .map(|(cat, details, _)| (cat.clone(), details.clone()))
+        .collect();
 
     let is_lockdown = repair::is_ghost_active();
-    let report = integrity::calculate(&issues, is_lockdown, true);
+    let report = integrity::calculate(&issues_for_score, is_lockdown, true);
     set_integrity_report(report.clone());
     set_trust_level(trust::get_trust_score());
 
-    let categories: Vec<&String> = issues.iter().map(|(cat, _)| cat).collect();
+    let categories: Vec<&String> = issues.iter().map(|(cat, _, _)| cat).collect();
     if categories.is_empty() {
         format!("Scanned 34 signals | No issues found | Score: {}", report.score)
     } else {
         format!("Scanned 34 signals | {} issue(s) found: {:?} | Score: {}", categories.len(), categories, report.score)
     }
+}
+
+// ============================================
+// CHECK PENDING APPROVAL
+// ============================================
+
+fn check_pending_approval(category: &str) -> bool {
+    use crate::modules::timeline;
+    
+    let timeline_data = timeline::export_timeline("json");
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&timeline_data) {
+        if let Some(entries) = json.as_array() {
+            for entry in entries {
+                if let (Some(entry_category), Some(action), Some(result)) = (
+                    entry.get("category").and_then(|v| v.as_str()),
+                    entry.get("action").and_then(|v| v.as_str()),
+                    entry.get("result").and_then(|v| v.as_str()),
+                ) {
+                    if entry_category == category 
+                        && action == "pending_approval" 
+                        && result == "AwaitingApproval" {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
 }

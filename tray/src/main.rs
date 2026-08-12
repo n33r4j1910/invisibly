@@ -43,8 +43,124 @@ const API_URL: &str = "http://127.0.0.1:12790";
 const DAEMON_EXE: &str = "C:\\Invisibly\\target\\release\\invisibly-daemon.exe";
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-// FIX: Tray supervises the daemon - if it stops responding, relaunch it
-// instead of waiting for the next logon (Scheduled Task only fires then).
+// ============================================
+// TOKEN STORAGE
+// ============================================
+
+static TOKEN: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+fn get_token() -> Option<String> {
+    let mut guard = TOKEN.lock().unwrap();
+    if let Some(token) = guard.as_ref() {
+        return Some(token.clone());
+    }
+    
+    // Fetch token from daemon
+    let client = reqwest::blocking::Client::new();
+    if let Ok(resp) = client.get(&format!("{}/token", API_URL)).timeout(Duration::from_secs(2)).send() {
+        if let Ok(json) = resp.json::<serde_json::Value>() {
+            if let Some(token) = json.get("token").and_then(|t| t.as_str()) {
+                let token_str = token.to_string();
+                *guard = Some(token_str.clone());
+                return Some(token_str);
+            }
+        }
+    }
+    None
+}
+
+// ============================================
+// GET PENDING CATEGORIES FROM TIMELINE
+// ============================================
+
+fn get_pending_categories() -> Vec<String> {
+    let mut pending = Vec::new();
+    let token = match get_token() {
+        Some(t) => t,
+        None => return pending,
+    };
+    
+    let client = reqwest::blocking::Client::new();
+    let url = format!("{}/timeline?format=json", API_URL);
+    
+    match client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .timeout(Duration::from_secs(5))
+        .send()
+    {
+        Ok(resp) => {
+            if let Ok(json) = resp.json::<serde_json::Value>() {
+                if let Some(entries) = json.as_array() {
+                    for entry in entries {
+                        if let (Some(category), Some(action), Some(result)) = (
+                            entry.get("category").and_then(|v| v.as_str()),
+                            entry.get("action").and_then(|v| v.as_str()),
+                            entry.get("result").and_then(|v| v.as_str()),
+                        ) {
+                            if action == "pending_approval" && result == "AwaitingApproval" {
+                                if !pending.contains(&category.to_string()) {
+                                    pending.push(category.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            println!("❌ Failed to get timeline: {}", e);
+        }
+    }
+    pending
+}
+
+// ============================================
+// CALL APPROVE ENDPOINT (SINGLE CATEGORY)
+// ============================================
+
+fn call_approve(category: &str) -> bool {
+    let token = match get_token() {
+        Some(t) => t,
+        None => {
+            println!("❌ Failed to get token for approve");
+            return false;
+        }
+    };
+    
+    let client = reqwest::blocking::Client::new();
+    let url = format!("{}/approve?category={}", API_URL, category);
+    
+    match client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .timeout(Duration::from_secs(5))
+        .send() 
+    {
+        Ok(resp) => {
+            if resp.status().is_success() {
+                if let Ok(json) = resp.json::<serde_json::Value>() {
+                    if let Some(msg) = json.get("message").and_then(|m| m.as_str()) {
+                        println!("✅ Approve successful: {}", msg);
+                    }
+                }
+                true
+            } else {
+                println!("❌ Approve failed: HTTP {}", resp.status());
+                false
+            }
+        }
+        Err(e) => {
+            println!("❌ Approve error: {}", e);
+            false
+        }
+    }
+}
+
+// ============================================
+// FIX: Tray supervises the daemon
+// ============================================
+
 fn relaunch_daemon() {
     println!("🔁 Daemon unresponsive - attempting relaunch...");
     match process::Command::new(DAEMON_EXE)
@@ -96,10 +212,24 @@ impl ApplicationHandler<UserEvent> for TrayApp {
 
         println!("🔄 TrayApp::resumed() - Creating tray icon");
 
+        // FIX: Show pending count in menu
+        let pending = get_pending_categories();
+        let pending_count = pending.len();
+        let approve_label = if pending_count > 0 {
+            format!("Approve Pending Changes ({})", pending_count)
+        } else {
+            "Approve Pending Changes (0)".to_string()
+        };
+
         let menu = Menu::new();
         let open_item = MenuItem::with_id("open_dashboard", "Open Dashboard", true, None);
+        let approve_item = MenuItem::with_id("approve_all", &approve_label, true, None);
+        let separator = MenuItem::with_id("sep", "", false, None);
         let quit_item = MenuItem::with_id("quit_app", "Quit", true, None);
+        
         menu.append(&open_item).unwrap();
+        menu.append(&approve_item).unwrap();
+        menu.append(&separator).unwrap();
         menu.append(&quit_item).unwrap();
 
         let tray = TrayIconBuilder::new()
@@ -120,8 +250,6 @@ impl ApplicationHandler<UserEvent> for TrayApp {
         _event: WindowEvent,
     ) {
         // FIX #29: Handle WM_TASKBARCREATED
-        // Note: Full implementation requires windows message handling
-        // This is a placeholder for the message handling
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
@@ -131,6 +259,25 @@ impl ApplicationHandler<UserEvent> for TrayApp {
                 match event.id.as_ref() {
                     "open_dashboard" => {
                         open_dashboard();
+                    }
+                    "approve_all" => {
+                        println!("🔓 Checking pending approvals...");
+                        let pending = get_pending_categories();
+                        
+                        if pending.is_empty() {
+                            println!("✅ No pending approvals found");
+                        } else {
+                            println!("📋 Found {} pending category(s): {:?}", pending.len(), pending);
+                            let mut success_count = 0;
+                            for category in &pending {
+                                println!("🔓 Approving: {}", category);
+                                if call_approve(category) {
+                                    success_count += 1;
+                                }
+                                std::thread::sleep(Duration::from_millis(500));
+                            }
+                            println!("✅ Approved {}/{} pending items", success_count, pending.len());
+                        }
                     }
                     "quit_app" => {
                         println!("Exiting...");
@@ -144,17 +291,13 @@ impl ApplicationHandler<UserEvent> for TrayApp {
                     _ => {}
                 }
             }
-            // FIX #29: Handle taskbar re-creation
             UserEvent::TaskbarCreated => {
                 println!("🔄 Taskbar recreated - re-creating tray icon");
-                // Re-create the tray icon
                 if let Some(tray) = self.tray.take() {
                     let _ = tray.set_visible(false);
                     drop(tray);
                 }
-                // Trigger resumed() to recreate
                 self.resumed(event_loop);
-                // Send a status update to refresh the icon
                 let _ = self.proxy.send_event(UserEvent::StatusUpdate(None));
             }
             UserEvent::StatusUpdate(status) => {
@@ -165,8 +308,6 @@ impl ApplicationHandler<UserEvent> for TrayApp {
                             println!("📊 Status: trust_state={}, integrity_state={:?}, enabled={}", 
                                      s.trust_state, s.integrity_state, s.enabled);
                             
-                            // FIX C10: Branch on integrity_state instead of trust_state
-                            // Use integrity_state for color, trust_state only for Ghost
                             match s.integrity_state.as_deref() {
                                 Some("Maintained") => {
                                     if s.enabled {
@@ -185,7 +326,6 @@ impl ApplicationHandler<UserEvent> for TrayApp {
                                     (self.icons.3.clone(), "🔵 Lockdown Active\nRight-click for menu")
                                 }
                                 _ => {
-                                    // Fallback to trust_state for Ghost/Trusted
                                     match s.trust_state.as_str() {
                                         "Ghost" => (self.icons.3.clone(), "🔵 Ghost Mode Active\nRight-click for menu"),
                                         "Trusted" => {
@@ -233,10 +373,7 @@ fn check_single_instance() -> bool {
     }
 }
 
-// FIX #29: Function to register for taskbar creation notification
 fn register_taskbar_notification() {
-    // This is a placeholder for the actual window message registration
-    // In a full implementation, you would use RegisterWindowMessage and set up a hidden window
     println!("🔔 Taskbar notification registered");
 }
 
@@ -248,7 +385,6 @@ fn main() {
 
     println!("🛡️ Invisibly Tray - Starting...");
 
-    // FIX #29: Register for taskbar creation notification
     register_taskbar_notification();
 
     let event_loop = EventLoop::with_user_event().build().unwrap();
@@ -270,8 +406,6 @@ fn main() {
     std::thread::spawn(move || {
         let client = reqwest::blocking::Client::new();
         println!("🔄 Status polling thread started");
-        // FIX: Track consecutive failures so a crashed/hung daemon gets
-        // relaunched automatically, with a cooldown to avoid a spawn storm.
         let mut consecutive_failures: u32 = 0;
         let mut last_relaunch: Option<std::time::Instant> = None;
         loop {

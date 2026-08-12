@@ -44,6 +44,7 @@ fn get_cached_entries() -> Vec<TimelineEntry> {
 pub struct TimelineEntry {
     pub id: u64,
     pub timestamp: String,
+    pub monotonic_counter: u64,  // FIX: Add monotonic counter for clock drift protection
     pub category: String,
     pub action: String,
     pub before: String,
@@ -66,6 +67,7 @@ pub struct Timeline {
     pub entries: Vec<TimelineEntry>,
     pub last_hash: String,
     pub chain_valid: bool,
+    pub entry_count: u64,
 }
 
 // ============================================
@@ -81,21 +83,23 @@ pub fn add_entry(
 ) -> Result<(), String> {
     let previous = get_last_hash();
     let id = get_next_id();
+    let counter = get_next_counter();  // FIX: Use monotonic counter
 
     let entry = TimelineEntry {
         id,
         timestamp: Local::now().to_rfc3339(),
+        monotonic_counter: counter,
         category: category.to_string(),
         action: action.to_string(),
         before: before.to_string(),
         after: after.to_string(),
         result: result.clone(),
         previous_hash: previous.clone(),
-        hash: compute_hash(&previous, id, category, action, before, after, &result),
+        hash: compute_hash(&previous, id, category, action, before, after, &result, counter),
     };
 
     append_entry(&entry)?;
-    invalidate_cache(); // FIX #25: Invalidate cache on new entry
+    invalidate_cache();
     Ok(())
 }
 
@@ -103,10 +107,12 @@ pub fn get_full_timeline() -> Timeline {
     let entries = get_cached_entries();
     let last_hash = get_last_hash();
     let chain_valid = verify_chain();
+    let entry_count = entries.len() as u64;
     Timeline {
         entries,
         last_hash,
         chain_valid,
+        entry_count,
     }
 }
 
@@ -127,7 +133,14 @@ pub fn verify_chain() -> bool {
     }
 
     let mut prev_hash = String::from("0");
+    let mut prev_counter: u64 = 0;
     for entry in &entries {
+        // Check monotonic counter is increasing
+        if entry.monotonic_counter <= prev_counter {
+            return false;
+        }
+        prev_counter = entry.monotonic_counter;
+
         let computed = compute_hash(
             &prev_hash,
             entry.id,
@@ -136,6 +149,7 @@ pub fn verify_chain() -> bool {
             &entry.before,
             &entry.after,
             &entry.result,
+            entry.monotonic_counter,
         );
         if computed != entry.hash {
             return false;
@@ -145,25 +159,48 @@ pub fn verify_chain() -> bool {
     true
 }
 
-// FIX #12: Verify chain on startup
+// FIX #12: Verify chain on startup with alert
 pub fn verify_chain_on_startup() -> bool {
     let result = verify_chain();
     if result {
         println!("✅ Timeline chain verified");
     } else {
         println!("❌ Timeline chain verification FAILED! Possible tampering detected.");
+        // FIX: Log the failure
+        let log_path = format!("{}\\timeline_failure.log", 
+            std::env::var("PROGRAMDATA").unwrap_or_else(|_| "C:\\ProgramData".to_string()));
+        let _ = fs::create_dir_all(Path::new(&log_path).parent().unwrap());
+        let entry = format!(
+            "{}|TIMELINE_CHAIN_FAILURE|Chain verification failed - possible tampering\n",
+            Local::now().format("%Y-%m-%d %H:%M:%S")
+        );
+        let _ = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+            .and_then(|mut f| {
+                use std::io::Write;
+                f.write_all(entry.as_bytes())
+            });
     }
     result
 }
 
 // FIX #12: Initialize timeline on daemon startup
-pub fn init_timeline() {
-    let _ = verify_chain_on_startup();
+pub fn init_timeline() -> bool {
+    verify_chain_on_startup()
 }
 
 // ============================================
 // HELPERS
 // ============================================
+
+// FIX: Get next counter value
+static NEXT_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn get_next_counter() -> u64 {
+    NEXT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+}
 
 fn get_last_hash() -> String {
     let entries = get_cached_entries();
@@ -183,10 +220,12 @@ fn compute_hash(
     before: &str,
     after: &str,
     result: &RepairResult,
+    counter: u64,
 ) -> String {
+    // FIX: Include counter in hash for clock drift protection
     let data = format!(
-        "{}{}{}{}{}{}{:?}",
-        previous, id, category, action, before, after, result
+        "{}{}{}{}{}{}{:?}{}",
+        previous, id, category, action, before, after, result, counter
     );
     hex::encode(ring::digest::digest(&ring::digest::SHA256, data.as_bytes()))
 }
@@ -247,12 +286,14 @@ fn format_timeline_markdown(entries: &[TimelineEntry]) -> String {
              - **After:** `{}`\n\
              - **Result:** {}\n\
              - **Entry ID:** {}\n\
+             - **Counter:** {}\n\
              - **Chain Hash:** `{}`\n\n",
             entry.action,
             entry.before,
             entry.after,
             result_str,
             entry.id,
+            entry.monotonic_counter,
             &entry.hash[..16]
         ));
     }
