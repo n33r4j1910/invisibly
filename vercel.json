@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "builds": [
+    { "src": "msix_package/**", "use": "@vercel/static" }
+  ],
+  "routes": [
+    { "src": "/(.*)", "dest": "/msix_package/$1" }
+  ]
+}
