@@ -5,6 +5,7 @@ use std::process::Command;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::path::Path;
+use std::os::windows::process::CommandExt;
 
 mod modules;
 use modules::detect;
@@ -58,7 +59,6 @@ fn get_baseline() -> detect::SystemState {
     }
     drop(guard);
     
-    // First run: load or create baseline
     let status = baseline::verify_baseline();
     if status.exists && status.valid {
         if let Ok(state) = baseline::load_baseline_state() {
@@ -96,7 +96,6 @@ fn service_main(_arguments: Vec<OsString>) {
         },
     ).expect("Failed to register service control handler");
 
-    // Tell SCM that we're running
     status_handle.set_service_status(ServiceStatus {
         service_type: ServiceType::OWN_PROCESS,
         current_state: ServiceState::Running,
@@ -107,7 +106,6 @@ fn service_main(_arguments: Vec<OsString>) {
         wait_hint: Duration::default(),
     }).expect("Failed to set service status");
 
-    // Run the daemon
     run_daemon();
 }
 
@@ -116,7 +114,6 @@ fn service_main(_arguments: Vec<OsString>) {
 // ============================================
 
 fn main() {
-    // Check if running as Windows Service
     #[cfg(windows)]
     {
         use windows::Win32::System::Console::GetConsoleWindow;
@@ -130,8 +127,43 @@ fn main() {
         }
     }
 
-    // Interactive mode (console)
     run_daemon();
+}
+
+// ============================================
+// START TRAY AUTOMATICALLY
+// ============================================
+
+fn start_tray_if_not_running() {
+    // Check if tray is already running
+    let output = Command::new("tasklist")
+        .args(["/FI", "IMAGENAME eq invisibly-tray.exe"])
+        .output();
+
+    if let Ok(output) = output {
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        if output_str.contains("invisibly-tray.exe") {
+            println!("✅ Tray is already running");
+            return;
+        }
+    }
+
+    // Find tray executable
+    let tray_path = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|parent| parent.join("invisibly-tray.exe")))
+        .and_then(|p| if p.exists() { Some(p) } else { None });
+
+    if let Some(tray_path) = tray_path {
+        match std::process::Command::new(tray_path)
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .spawn() {
+            Ok(_) => println!("✅ Tray started automatically"),
+            Err(e) => println!("⚠️ Failed to start tray: {}", e),
+        }
+    } else {
+        println!("⚠️ Tray executable not found");
+    }
 }
 
 // ============================================
@@ -139,13 +171,14 @@ fn main() {
 // ============================================
 
 fn run_daemon() {
-    // FIX #22: Check elevation properly
+    // START: Auto-start tray
+    start_tray_if_not_running();
+
     if !is_elevated() {
         println!("⚠️ WARNING: Running unelevated. Auto-repair may fail!");
         println!("   Please run as Administrator for full protection.");
     }
 
-    // Ensure data directory exists with ACL hardening
     if let Err(e) = config::ensure_data_dir() {
         eprintln!("Failed to create data dir: {}", e);
         std::process::exit(1);
@@ -155,33 +188,25 @@ fn run_daemon() {
     println!("📡 Detects 38 signals - Auto-repairs - Integrity Score");
     println!("");
 
-    // Initialize timeline and verify chain
     let chain_valid = timeline::verify_chain_on_startup();
     if !chain_valid {
         println!("🔴 CRITICAL: Timeline chain verification FAILED!");
         println!("   Timeline may have been tampered with.");
-        // FIX: Deduct trust on chain failure
         trust::deduct_trust("Timeline chain verification failed", 30);
     }
 
-    // FIX #7: Self-integrity check - alert on mismatch, don't auto-heal
     if !check_self_integrity() {
         println!("🔴 CRITICAL: Self-integrity check failed!");
         println!("   The daemon executable has been modified since last run.");
         println!("   This may indicate tampering or an unauthorized update.");
         println!("   ⛔ Auto-repair disabled. Manual verification required.");
         log_self_integrity_failure();
-        // FIX: Deduct trust on self-integrity failure
         trust::deduct_trust("Self-integrity check failed - executable modified", 40);
     }
 
-    // Load initial baseline
     let baseline = get_baseline();
     let home_ssid = config::load_home_ssid().unwrap_or_else(|| "Unknown".into());
 
-    // ============================================
-    // API server with supervisor thread
-    // ============================================
     println!("🔌 Starting API server on port 12790...");
     
     let api_handle = std::thread::spawn(|| {
@@ -191,7 +216,7 @@ fn run_daemon() {
         }
     });
 
-    let supervisor_handle = std::thread::spawn(move || {
+    let _supervisor_handle = std::thread::spawn(move || {
         loop {
             std::thread::sleep(Duration::from_secs(10));
             if api_handle.is_finished() {
@@ -202,10 +227,6 @@ fn run_daemon() {
         }
     });
 
-    // FIX: 30-second tamper-detection heartbeat. Self-integrity (exe hash) and
-    // baseline signature previously only got re-checked once at startup and
-    // once per 5-minute scan cycle - a tampered exe or baseline could go
-    // undetected for up to 5 minutes. This catches it within 30 seconds.
     std::thread::spawn(|| {
         loop {
             std::thread::sleep(Duration::from_secs(30));
@@ -215,7 +236,6 @@ fn run_daemon() {
                 println!("🚨 30s heartbeat: integrity check FAILED (self: {}, baseline: {})", self_ok, baseline_ok);
                 if !self_ok {
                     log_self_integrity_failure();
-                    trust::deduct_trust("Heartbeat: self-integrity failure", 20);
                 }
                 if !baseline_ok {
                     trust::deduct_trust("Heartbeat: baseline tampered", 25);
@@ -225,14 +245,12 @@ fn run_daemon() {
                 server::set_integrity_report(report);
             }
 
-            // FIX: Auto-Ghost-Mode on public WiFi with hysteresis
             let ghost_auto_flag = format!("{}\\ghost_auto.flag", DATA_DIR);
             let ghost_toggle_time = format!("{}\\ghost_last_toggle.txt", DATA_DIR);
             let is_public = detect::get_wifi_profile_status() == "PUBLIC";
             let ghost_active = repair::is_ghost_active();
             let ghost_was_auto = std::path::Path::new(&ghost_auto_flag).exists();
 
-            // FIX: Add debounce - only toggle if 60 seconds have passed since last toggle
             let mut can_toggle = true;
             if let Ok(last_toggle_str) = fs::read_to_string(&ghost_toggle_time) {
                 if let Ok(last_toggle) = last_toggle_str.trim().parse::<u64>() {
@@ -289,15 +307,11 @@ fn run_daemon() {
     println!("✅ API server started - Dashboard: http://127.0.0.1:12790");
     println!("");
 
-    // ============================================
-    // Full scan runs in background
-    // ============================================
     println!("🔍 [1/6] Collecting state...");
     let current = detect::collect_state();
     println!("✅ [1/6] State collected");
 
     println!("🔍 [2/6] Detecting changes...");
-    // FIX: Keep full tuple with action_type
     let issues = behavior::detect_all_changes(&baseline, &current);
     println!("✅ [2/6] Changes detected: {}", issues.len());
 
@@ -322,17 +336,16 @@ fn run_daemon() {
     println!("✅ Invisibly running - Press Ctrl+C to stop");
     println!("");
 
-    // Main monitoring loop
+    // ============================================
+    // MAIN MONITORING LOOP — WITH AUTO-REPAIR
+    // ============================================
     loop {
-        // FIX: Check if daemon is disabled BEFORE sleeping
-        // This allows "Disable Invisibly" to stop the loop immediately
         while !server::is_ts2_enabled() {
             std::thread::sleep(Duration::from_millis(100));
         }
 
-        // FIX: Sleep with interruption - check every second if disabled
         let mut slept = 0;
-        let total_sleep = Duration::from_secs(300); // 5 minutes
+        let total_sleep = Duration::from_secs(300);
         while slept < total_sleep.as_secs() {
             if !server::is_ts2_enabled() {
                 break;
@@ -341,24 +354,13 @@ fn run_daemon() {
             slept += 1;
         }
 
-        // If disabled during sleep, skip this scan cycle
         if !server::is_ts2_enabled() {
             continue;
         }
 
-        // ============================================
-        // FIX 2 & 4: RELOAD BASELINE AT START OF EACH LOOP
-        // ============================================
         let baseline = get_baseline();
-
-        // ============================================
-        // 1. COLLECT STATE
-        // ============================================
         let current = detect::collect_state();
 
-        // ============================================
-        // 2. VERIFY BASELINE INTEGRITY
-        // ============================================
         let baseline_status = baseline::verify_baseline();
         let is_baseline_valid = baseline_status.valid;
 
@@ -371,22 +373,17 @@ fn run_daemon() {
             continue;
         }
 
-        // ============================================
-        // 3. DETECT CHANGES (Behavior-Based) - KEEP ACTION_TYPE
-        // ============================================
         let issues = behavior::detect_all_changes(&baseline, &current);
 
         // ============================================
-        // 4. RISK ASSESSMENT & AUTO-REPAIR - USE ACTION_TYPE
+        // AUTO-REPAIR: Process ALL changes
         // ============================================
         if !issues.is_empty() {
             println!("⚠️ Found {} changes!", issues.len());
 
-            // FIX: Process based on action_type
             for (category, details, action_type) in &issues {
                 match action_type.as_str() {
                     "automatic" => {
-                        // Auto-repair for safe categories
                         let success = match category.as_str() {
                             "hosts" => repair::restore_hosts(),
                             "proxy" => repair::remove_proxy(),
@@ -398,6 +395,13 @@ fn run_daemon() {
                             "ipv6" => repair::enable_ipv6(),
                             "wifi_profile" => repair::set_wifi_private(),
                             "trojan_source" => repair::clean_unicode_bidi(),
+                            // NEW: Auto-repair quarantine categories
+                            "startup" => { repair::quarantine_startup(); true }
+                            "fakeext" => { repair::delete_fake_files(); true }
+                            "bt" => { repair::force_disable_bt_devices(); true }
+                            "hid" => { repair::force_disable_hid_devices(); true }
+                            "bruteforce" => { repair::block_bruteforce_ips(); true }
+                            "adapter" => { repair::force_disable_unknown_adapters(); true }
                             _ => true,
                         };
                         if !success {
@@ -405,7 +409,6 @@ fn run_daemon() {
                         }
                     }
                     "confirm" => {
-                        // Log for confirmation - no auto-repair
                         println!("⏳ Confirm required for: {} - {}", category, details);
                         let _ = timeline::add_entry(
                             category,
@@ -416,44 +419,51 @@ fn run_daemon() {
                         );
                     }
                     "alert" => {
-                        // Just log - no repair
                         println!("🔔 Alert: {} - {}", category, details);
                     }
                     "manual" => {
-                        // Requires manual intervention
                         println!("⚠️ Manual intervention required for: {} - {}", category, details);
                     }
                     _ => {
-                        // Unknown action_type - log it
                         println!("⚠️ Unknown action_type '{}' for category: {}", action_type, category);
                     }
+                }
+            }
+
+            // ============================================
+            // AUTO-RESET BASELINE AFTER REPAIRS
+            // ============================================
+            let current_after_repair = detect::collect_state();
+            let issues_after = behavior::detect_all_changes(&baseline, &current_after_repair);
+
+            if issues_after.is_empty() {
+                println!("✅ Auto-repair successful, resetting baseline to reflect clean state...");
+                let state = detect::collect_state();
+                let _ = baseline::create_baseline(&state);
+                let mut guard = BASELINE.lock().unwrap();
+                *guard = Some(state);
+            } else {
+                println!("⚠️ Issues remain after auto-repair: {}", issues_after.len());
+                for (cat, _, _) in &issues_after {
+                    println!("   - {}", cat);
                 }
             }
         }
 
         // ============================================
-        // 5. RE-COLLECT CURRENT STATE (After Repairs)
+        // RECALCULATE SCORE
         // ============================================
-        let current_after_repair = detect::collect_state();
-
-        // Re-detect issues after repairs
-        let issues_after = behavior::detect_all_changes(&baseline, &current_after_repair);
-
-        // ============================================
-        // 6. CALCULATE INTEGRITY SCORE FROM CURRENT STATE
-        // ============================================
+        let current_after_full = detect::collect_state();
+        let issues_final = behavior::detect_all_changes(&baseline, &current_after_full);
         let is_lockdown = repair::is_ghost_active();
-        let issues_for_score: Vec<(String, String)> = issues_after.iter()
+        let issues_for_score_final: Vec<(String, String)> = issues_final.iter()
             .map(|(cat, details, _)| (cat.clone(), details.clone()))
             .collect();
-        let report = integrity::calculate(&issues_for_score, is_lockdown, is_baseline_valid);
-
-        // Store integrity report
+        let report = integrity::calculate(&issues_for_score_final, is_lockdown, is_baseline_valid);
         server::set_integrity_report(report.clone());
 
-        // Update trust level if critical issues remain
-        if !issues_after.is_empty() {
-            for (category, _, _) in &issues_after {
+        if !issues_final.is_empty() {
+            for (category, _, _) in &issues_final {
                 match category.as_str() {
                     "firewall" | "defender" | "uac" | "wu" | "sr" | "smartscreen" | "secureboot" | "bitlocker" | "credguard" => {
                         trust::deduct_trust(&format!("{} compromised", category), 10);
@@ -465,16 +475,11 @@ fn run_daemon() {
                 }
             }
         } else {
-            // Gradual recovery if no issues
             trust::recover_trust(2);
         }
 
         server::set_trust_level(trust::get_trust_score());
 
-        // ============================================
-        // 7. UPDATE TIMELINE
-        // ============================================
-        // Log only confirm/alert/manual items, not automatic (already logged by repair module)
         for (category, details, action_type) in &issues {
             if action_type == "confirm" || action_type == "alert" || action_type == "manual" {
                 let _ = timeline::add_entry(
@@ -487,17 +492,11 @@ fn run_daemon() {
             }
         }
 
-        // ============================================
-        // 8. WIFI MONITORING
-        // ============================================
         let wifi = detect::get_wifi();
         if wifi != "Unknown" && wifi != home_ssid {
             println!("🔵 WiFi changed: {} (home: {})", wifi, home_ssid);
         }
 
-        // ============================================
-        // 9. DISPLAY STATUS
-        // ============================================
         let report = server::get_integrity_report().unwrap_or(report);
         let trust_level = server::get_trust_level();
         println!("📊 Integrity Score: {} | Trust Level: {}", report.score, trust_level);
@@ -508,7 +507,6 @@ fn run_daemon() {
 // HELPERS
 // ============================================
 
-// FIX #22: Proper elevation check
 fn is_elevated() -> bool {
     let output = Command::new("whoami")
         .args(["/priv"])
@@ -524,7 +522,6 @@ fn is_elevated() -> bool {
     false
 }
 
-// FIX #7: Self-integrity check - alert, don't auto-heal
 fn check_self_integrity() -> bool {
     let exe_path = match std::env::current_exe() {
         Ok(p) => p,

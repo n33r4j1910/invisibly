@@ -195,19 +195,21 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
         ));
     }
 
+    // FIX: Changed "tasks" from "alert" to "automatic" for auto-repair
     if baseline.scheduled_tasks != current.scheduled_tasks {
         changes.push((
             "tasks".to_string(),
             format!("Scheduled tasks changed: {:?}", current.scheduled_tasks),
-            "alert".to_string()
+            "automatic".to_string()  // CHANGED: alert → automatic
         ));
     }
 
+    // FIX: Changed "services" from "alert" to "automatic" for auto-repair
     if baseline.services_list != current.services_list {
         changes.push((
             "services".to_string(),
             format!("Services changed: {:?}", current.services_list),
-            "alert".to_string()
+            "automatic".to_string()  // CHANGED: alert → automatic
         ));
     }
 

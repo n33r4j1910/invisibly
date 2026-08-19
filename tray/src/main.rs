@@ -55,7 +55,6 @@ fn get_token() -> Option<String> {
         return Some(token.clone());
     }
     
-    // Fetch token from daemon
     let client = reqwest::blocking::Client::new();
     if let Ok(resp) = client.get(&format!("{}/token", API_URL)).timeout(Duration::from_secs(2)).send() {
         if let Ok(json) = resp.json::<serde_json::Value>() {
@@ -212,7 +211,6 @@ impl ApplicationHandler<UserEvent> for TrayApp {
 
         println!("🔄 TrayApp::resumed() - Creating tray icon");
 
-        // FIX: Show pending count in menu
         let pending = get_pending_categories();
         let pending_count = pending.len();
         let approve_label = if pending_count > 0 {
@@ -305,49 +303,59 @@ impl ApplicationHandler<UserEvent> for TrayApp {
                 if let Some(tray) = &self.tray {
                     let (icon, tooltip) = match status {
                         Some(s) => {
-                            println!("📊 Status: trust_state={}, integrity_state={:?}, enabled={}", 
-                                     s.trust_state, s.integrity_state, s.enabled);
+                            println!("📊 Status: score={:?}, state={:?}, enabled={}", 
+                                     s.integrity_score, s.integrity_state, s.enabled);
                             
-                            match s.integrity_state.as_deref() {
-                                Some("Maintained") => {
+                            // FIX: Use INTEGRITY SCORE for color (not state string)
+                            match s.integrity_score {
+                                Some(score) if score >= 90 => {
                                     if s.enabled {
-                                        (self.icons.0.clone(), "🟢 Maintained - Secure\nRight-click for menu")
+                                        (self.icons.0.clone(), format!("🟢 Maintained - {}%\nRight-click for menu", score))
                                     } else {
-                                        (self.icons.4.clone(), "⚪ Disabled - Monitor Only")
+                                        (self.icons.4.clone(), "⚪ Disabled - Monitor Only".to_string())
                                     }
                                 }
-                                Some("DriftDetected") => {
-                                    (self.icons.1.clone(), "🟡 Drift Detected - Review changes\nRight-click for menu")
+                                Some(score) if score >= 70 => {
+                                    (self.icons.1.clone(), format!("🟡 Drift Detected - {}%\nRight-click for menu", score))
                                 }
-                                Some("Compromised") => {
-                                    (self.icons.2.clone(), "🔴 COMPROMISED - Check Dashboard\nRight-click for menu")
+                                Some(score) if score >= 40 => {
+                                    (self.icons.2.clone(), format!("🔴 Compromised - {}%\nRight-click for menu", score))
                                 }
-                                Some("Lockdown") => {
-                                    (self.icons.3.clone(), "🔵 Lockdown Active\nRight-click for menu")
+                                Some(score) => {
+                                    (self.icons.2.clone(), format!("🔴 CRITICAL - {}%\nRight-click for menu", score))
                                 }
-                                _ => {
-                                    match s.trust_state.as_str() {
-                                        "Ghost" => (self.icons.3.clone(), "🔵 Ghost Mode Active\nRight-click for menu"),
-                                        "Trusted" => {
-                                            if s.enabled {
-                                                (self.icons.0.clone(), "🟢 Trusted - Active\nRight-click for menu")
-                                            } else {
-                                                (self.icons.4.clone(), "⚪ Disabled - Monitor Only")
+                                None => {
+                                    // Fallback to state string if score missing
+                                    match s.integrity_state.as_deref() {
+                                        Some("Maintained") => (self.icons.0.clone(), "🟢 Maintained\nRight-click for menu".to_string()),
+                                        Some("DriftDetected") => (self.icons.1.clone(), "🟡 Drift Detected\nRight-click for menu".to_string()),
+                                        Some("Compromised") => (self.icons.2.clone(), "🔴 Compromised\nRight-click for menu".to_string()),
+                                        Some("Lockdown") => (self.icons.3.clone(), "🔵 Lockdown Active\nRight-click for menu".to_string()),
+                                        _ => {
+                                            match s.trust_state.as_str() {
+                                                "Ghost" => (self.icons.3.clone(), "🔵 Ghost Mode Active\nRight-click for menu".to_string()),
+                                                "Trusted" => {
+                                                    if s.enabled {
+                                                        (self.icons.0.clone(), "🟢 Trusted - Active\nRight-click for menu".to_string())
+                                                    } else {
+                                                        (self.icons.4.clone(), "⚪ Disabled - Monitor Only".to_string())
+                                                    }
+                                                }
+                                                _ => (self.icons.4.clone(), "⚪ Checking...".to_string()),
                                             }
                                         }
-                                        _ => (self.icons.4.clone(), "⚪ Checking..."),
                                     }
                                 }
                             }
                         }
                         None => {
                             println!("⚠️ No status received - daemon offline");
-                            (self.icons.4.clone(), "⚪ Daemon offline")
+                            (self.icons.4.clone(), "⚪ Daemon offline".to_string())
                         }
                     };
                     println!("🎨 Setting icon and tooltip");
                     let _ = tray.set_icon(Some(icon));
-                    let _ = tray.set_tooltip(Some(tooltip));
+                    let _ = tray.set_tooltip(Some(&tooltip));
                 } else {
                     println!("⚠️ Tray is None, cannot update icon");
                 }
