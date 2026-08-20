@@ -20,6 +20,7 @@ use modules::timeline;
 use modules::baseline;
 use modules::trust;
 use modules::behavior;
+use modules::watcher;
 
 const DATA_DIR: &str = "C:\\ProgramData\\Invisibly";
 const SCHEDULED_TASK_NAME: &str = "InvisiblyDaemon";
@@ -257,8 +258,10 @@ fn run_daemon() {
         std::process::exit(1);
     }
 
+    watcher::start_watching(config::load_watched_folders());
+
     println!("🛡️ Invisibly - Autonomous Endpoint Security");
-    println!("📡 Detects 38 signals - Auto-repairs - Integrity Score");
+    println!("📡 Detects 35 signals - Auto-repairs - Integrity Score - Real-time ransomware watch");
     println!("");
 
     let chain_valid = timeline::verify_chain_on_startup();
@@ -316,7 +319,23 @@ fn run_daemon() {
 
             let self_ok = check_self_integrity();
             server::set_tamper_detected(!self_ok);
-            let baseline_ok = baseline::verify_baseline().valid;
+            let baseline_status_hb = baseline::verify_baseline();
+            let mut baseline_ok = baseline_status_hb.valid;
+
+            // AUTO-RECOVERY: same criteria as the main loop - don't drain trust
+            // for something that's about to self-heal anyway. Without this, this
+            // independent 30s timer can catch the same transient invalid window
+            // the main loop is already fixing and deduct trust for nothing.
+            if !baseline_ok && baseline_status_hb.exists && self_ok && crypto::key_read_healthy() {
+                println!("🔧 30s heartbeat: baseline invalid but key healthy and executable untampered - regenerating instead of deducting trust");
+                let state = detect::collect_state();
+                if baseline::create_baseline(&state).is_ok() {
+                    let mut guard = BASELINE.lock().unwrap();
+                    *guard = Some(state);
+                    baseline_ok = true;
+                }
+            }
+
             if !self_ok || !baseline_ok {
                 println!("🚨 30s heartbeat: integrity check FAILED (self: {}, baseline: {})", self_ok, baseline_ok);
                 if !self_ok {
@@ -464,6 +483,12 @@ fn run_daemon() {
                 if baseline::create_baseline(&state).is_ok() {
                     let mut guard = BASELINE.lock().unwrap();
                     *guard = Some(state);
+                    drop(guard);
+                    // Refresh the served report immediately instead of leaving the
+                    // stale "Invalid" report up for another full ~30s cycle.
+                    let is_lockdown = repair::is_ghost_active();
+                    let report = integrity::calculate(&[], is_lockdown, true);
+                    server::set_integrity_report(report);
                     continue;
                 }
             }

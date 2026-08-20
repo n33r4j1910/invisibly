@@ -19,3 +19,4 @@ rand = { workspace = true }
 windows = { workspace = true }
 windows-service = "0.7"
 once_cell = "1.19"
+notify = "6"

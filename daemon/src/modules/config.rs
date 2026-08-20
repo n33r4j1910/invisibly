@@ -23,6 +23,47 @@ pub fn save_home_ssid(ssid: &str) {
     let _ = fs::write(&path, ssid);
 }
 
+// ============================================
+// WATCHED FOLDERS (real-time ransomware detection)
+// ============================================
+
+/// Default folders picked by where ransomware actually targets, not an
+/// exhaustive list - Documents/Desktop/Pictures/Downloads. Deliberately
+/// short: watching more folders (or a whole drive) means more background
+/// Windows/app noise and a higher chance of the OS dropping change
+/// notifications under load, which is worse than not watching at all.
+fn default_watched_folders() -> Vec<String> {
+    let home = std::env::var("USERPROFILE").unwrap_or_default();
+    if home.is_empty() {
+        return Vec::new();
+    }
+    ["Documents", "Desktop", "Pictures", "Downloads"]
+        .iter()
+        .map(|d| format!("{}\\{}", home, d))
+        .filter(|p| std::path::Path::new(p).exists())
+        .collect()
+}
+
+pub fn load_watched_folders() -> Vec<String> {
+    let path = format!("{}\\watched_folders.txt", DATA_DIR);
+    if let Ok(data) = fs::read_to_string(&path) {
+        let folders: Vec<String> = data.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect();
+        if !folders.is_empty() {
+            return folders;
+        }
+    }
+    // First run: seed with the defaults and persist them, so the list shown
+    // in the dashboard matches what's actually being watched.
+    let defaults = default_watched_folders();
+    save_watched_folders(&defaults);
+    defaults
+}
+
+fn save_watched_folders(folders: &[String]) {
+    let path = format!("{}\\watched_folders.txt", DATA_DIR);
+    let _ = fs::write(&path, folders.join("\n"));
+}
+
 // FIX #13: Log icacls failures, don't silently ignore
 pub fn ensure_data_dir() -> std::io::Result<()> {
     fs::create_dir_all(DATA_DIR)?;

@@ -88,6 +88,22 @@ pub fn is_ts2_enabled() -> bool {
 }
 
 // ============================================
+// RANSOMWARE ALERT (real-time watcher, see watcher.rs) - reflects current
+// state, auto-clears itself once activity settles, same pattern as
+// TAMPER_DETECTED above.
+// ============================================
+
+static RANSOMWARE_ALERT: AtomicBool = AtomicBool::new(false);
+
+pub fn set_ransomware_alert(active: bool) {
+    RANSOMWARE_ALERT.store(active, Ordering::Release);
+}
+
+pub fn is_ransomware_alert() -> bool {
+    RANSOMWARE_ALERT.load(Ordering::Acquire)
+}
+
+// ============================================
 // INTEGRITY REPORT
 // ============================================
 
@@ -452,9 +468,10 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                 let trust_level = get_trust_level();
                 let elevated = is_elevated();
                 let tamper_detected = is_tamper_detected();
+                let ransomware_alert = is_ransomware_alert();
 
                 json_response(200, &format!(
-                    r#"{{"status":"ok","trust_state":"{}","ghost":{},"enabled":{},"integrity_score":{},"integrity_state":"{}","trust_level":{},"elevated":{},"tamper_detected":{}}}"#,
+                    r#"{{"status":"ok","trust_state":"{}","ghost":{},"enabled":{},"integrity_score":{},"integrity_state":"{}","trust_level":{},"elevated":{},"tamper_detected":{},"ransomware_alert":{}}}"#,
                     trust_state,
                     ghost,
                     enabled,
@@ -462,7 +479,8 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                     state_str,
                     trust_level,
                     elevated,
-                    tamper_detected
+                    tamper_detected,
+                    ransomware_alert
                 ))
             }
             ("GET", "/dashboard") => {
@@ -480,15 +498,17 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                     let trust_level = get_trust_level();
                     let elevated = is_elevated();
                     let tamper_detected = is_tamper_detected();
+                    let ransomware_alert = is_ransomware_alert();
                     json_response(200, &format!(
-                        r#"{{"trust_state":"{}","ghost":{},"enabled":{},"integrity_score":{},"trust_level":{},"elevated":{},"tamper_detected":{}}}"#,
+                        r#"{{"trust_state":"{}","ghost":{},"enabled":{},"integrity_score":{},"trust_level":{},"elevated":{},"tamper_detected":{},"ransomware_alert":{}}}"#,
                         trust_state,
                         ghost,
                         enabled,
                         score,
                         trust_level,
                         elevated,
-                        tamper_detected
+                        tamper_detected,
+                        ransomware_alert
                     ))
                 }
             }
@@ -610,6 +630,15 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                 } else {
                     set_ts2_enabled(false);
                     json_response(200, r#"{"status":"ok","message":"Invisibly disabled"}"#)
+                }
+            }
+            ("GET", "/watched-folders") => {
+                if !validate_auth(&headers, token) {
+                    unauthorized()
+                } else {
+                    let folders = crate::modules::config::load_watched_folders();
+                    let list = folders.iter().map(|f| format!("\"{}\"", json_escape(f))).collect::<Vec<_>>().join(",");
+                    json_response(200, &format!(r#"{{"folders":[{}]}}"#, list))
                 }
             }
             ("POST", "/rollback") => {

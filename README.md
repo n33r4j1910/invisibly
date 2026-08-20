@@ -112,6 +112,8 @@ Unicode Bidi / Zero-width Attack Detection 	❌ 	 ❌ 	 ❌ 	 ✅
 
 Suspicious Process Detection 	 	⚠️ 	 ❌ 	 ⚠️ 	 ✅ 
 
+Real-Time Ransomware Pattern Detection 	⚠️ 	 ❌ 	 ⚠️ 	 ✅ 
+
 *Privacy \& Performance* 				
 
 Fully Offline Operation 	 	⚠️ 	 ✅ 	 ❌ 	 ✅ 
@@ -195,6 +197,8 @@ Invisibly doesn't just check for known threats — it detects **any** change to 
 **ANY future threat** | **Detected as a configuration change**
 
 This means Invisibly catches **unknown threats** too — not just pre-defined signatures.
+
+*One exception to the 30-second cycle:* ransomware can finish encrypting a folder faster than a 30s check can catch it. See *Real-Time Ransomware Watch* below — it's the one thing in Invisibly that reacts instantly instead of on the next cycle.
 
 
 * Security Controls (11 signals) *
@@ -319,6 +323,20 @@ Auto-enables on public networks, auto-disables when you're back on a trusted one
 - Disables Network Discovery and file sharing
 
 
+* Real-Time Ransomware Watch *
+
+
+Watches Documents, Desktop, Pictures, and Downloads live — not on the usual 30-second cycle. If it sees a burst of 20+ file changes within 10 seconds (the signature of mass encryption, not a normal edit), it alerts immediately:
+
+- Instant tray alert (highest priority — above even a tamper alert) and dashboard banner
+
+- Alert-only, not auto-kill: this tells you *what* changed, not *which process* did it, so there's no reliable target to automatically terminate yet
+
+- Auto-clears once file activity settles down
+
+- Fixed to these four folders on purpose — not user-editable yet, and deliberately not extended to a whole drive (more folders means more background noise, and Windows can start silently dropping change notifications under heavy load)
+
+
 * System Tray *
 
 
@@ -328,7 +346,7 @@ Auto-enables on public networks, auto-disables when you're back on a trusted one
 
 | 🟡 Yellow | Drift detected |
 
-| 🔴 Red | Critical issues, or (highest priority) a security alert — the app's own executable failed its tamper check |
+| 🔴 Red | Critical issues; a security alert (executable tamper check failed); or (highest priority) possible ransomware activity detected in real time |
 
 | 🔵 Blue | Ghost Mode active |
 
@@ -360,7 +378,7 @@ Auto-enables on public networks, auto-disables when you're back on a trusted one
 
 * This starts the daemon and tray automatically at every login from then on — no manual launch needed.
 
-* Optional – Set Home WiFi — Click "Set Home WiFi" in the dashboard and enter your network name
+* Optional – Set Home WiFi — supported via the daemon's local API (`POST /home`); not yet exposed as a dashboard button
 
 
 
@@ -382,6 +400,10 @@ Auto-enables on public networks, auto-disables when you're back on a trusted one
 
 - Verify Trust
 
+- Restart Daemon
+
+- Sanitize (clean up logs/temp data)
+
 
 * Requirements *
 
@@ -393,7 +415,7 @@ Auto-enables on public networks, auto-disables when you're back on a trusted one
 
 Keywords
 
-endpoint integrity, configuration monitoring, behavior-based detection, DNS hijacking, ARP spoofing, hosts file protection, firewall monitoring, defender monitoring, UAC protection, Windows Update monitoring, System Restore protection, SmartScreen monitoring, Bluetooth security, HID protection, RDP protection, homoglyph detection, zero-width attacks, Unicode bidi attacks, brute force detection, proxy monitoring, scheduled tasks monitoring, startup persistence, Windows Services monitoring, Ghost Mode, public WiFi protection, stealth mode, integrity score, trust level, security baseline, auto-repair, self-healing, tamper detection, DPAPI encryption, configuration drift detection, offline security, no telemetry, privacy-first, lightweight, Windows security, Rust, autonomous endpoint protection, security timeline
+endpoint integrity, configuration monitoring, behavior-based detection, DNS hijacking, ARP spoofing, hosts file protection, firewall monitoring, defender monitoring, UAC protection, Windows Update monitoring, System Restore protection, SmartScreen monitoring, Bluetooth security, HID protection, RDP protection, homoglyph detection, zero-width attacks, Unicode bidi attacks, brute force detection, proxy monitoring, scheduled tasks monitoring, startup persistence, Windows Services monitoring, Ghost Mode, public WiFi protection, stealth mode, integrity score, trust level, security baseline, auto-repair, self-healing, tamper detection, DPAPI encryption, ransomware detection, real-time file monitoring, configuration drift detection, offline security, no telemetry, privacy-first, lightweight, Windows security, Rust, autonomous endpoint protection, security timeline
 
 * License *
 

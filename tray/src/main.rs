@@ -41,6 +41,10 @@ struct DaemonStatus {
     // state that must be surfaced to the user, never silently auto-repaired.
     #[serde(default)]
     tamper_detected: bool,
+    // Real-time watcher (watcher.rs) saw a burst of rapid file changes in a
+    // watched folder - possible ransomware activity, not just config drift.
+    #[serde(default)]
+    ransomware_alert: bool,
 }
 
 #[derive(Debug)]
@@ -262,6 +266,7 @@ struct TrayApp {
     approve_item: Option<MenuItem>,
     last_pending_count: usize,
     last_tamper_state: bool,
+    last_ransomware_state: bool,
 }
 
 impl ApplicationHandler<UserEvent> for TrayApp {
@@ -382,6 +387,11 @@ impl ApplicationHandler<UserEvent> for TrayApp {
                         show_notification("Invisibly - Security Alert", "The app's own executable failed its integrity check. Open the dashboard for details.", true);
                     }
                     self.last_tamper_state = s.tamper_detected;
+
+                    if s.ransomware_alert && !self.last_ransomware_state {
+                        show_notification("Invisibly - Possible Ransomware", "A burst of rapid file changes was detected in a watched folder. Open the dashboard now.", true);
+                    }
+                    self.last_ransomware_state = s.ransomware_alert;
                 }
 
                 if let Some(tray) = &self.tray {
@@ -390,8 +400,12 @@ impl ApplicationHandler<UserEvent> for TrayApp {
                             println!("📊 Status: score={:?}, state={:?}, ghost={}, enabled={}", 
                                      s.integrity_score, s.integrity_state, s.ghost, s.enabled);
                             
-                            // FIX: Check GHOST MODE FIRST
-                            if s.tamper_detected {
+                            // Highest priority: an active, time-critical attack in
+                            // progress beats a standing integrity concern, which
+                            // beats everything else.
+                            if s.ransomware_alert {
+                                (self.icons.2.clone(), "🔴 POSSIBLE RANSOMWARE - rapid file changes detected\nOpen Dashboard now".to_string())
+                            } else if s.tamper_detected {
                                 (self.icons.2.clone(), "🔴 SECURITY ALERT - executable may be tampered\nOpen Dashboard for details".to_string())
                             } else if s.ghost {
                                 (self.icons.3.clone(), format!("🔵 Ghost Mode Active - {}%\nRight-click for menu",
@@ -550,6 +564,7 @@ fn main() {
         approve_item: None,
         last_pending_count: 0,
         last_tamper_state: false,
+        last_ransomware_state: false,
     };
 
     println!("🚀 Running event loop...");

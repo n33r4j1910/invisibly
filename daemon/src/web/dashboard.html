@@ -107,6 +107,12 @@
     </h1>
     <div class="subtitle">Autonomous endpoint security agent — Silent · Dashboard-only alerts</div>
 
+    <div id="ransomware-banner" style="display:none; background:#3a0f14; border:1px solid #e0405a; color:#ff8a9a; border-radius:10px; padding:14px 18px; margin-bottom:16px; font-size:14px; line-height:1.5;">
+        <strong>🔴 Possible ransomware activity: a burst of rapid file changes was detected in a watched folder.</strong><br>
+        This is a real-time pattern alert (many files changed in a few seconds), not a confirmed detection - it can also be triggered by a legitimate bulk operation (extracting an archive, a large sync). Check what's actually running before assuming the worst, but don't ignore it.<br>
+        <strong>What to do:</strong> open Task Manager and look for anything unfamiliar with high disk activity right now. This clears on its own once file activity settles.
+    </div>
+
     <div id="tamper-banner" style="display:none; background:#3a0f14; border:1px solid #e0405a; color:#ff8a9a; border-radius:10px; padding:14px 18px; margin-bottom:16px; font-size:14px; line-height:1.5;">
         <strong>🔴 Security alert: Invisibly's own executable does not match its last known-good signature.</strong><br>
         This could mean the app was tampered with, or corrupted during an update. Auto-repair is disabled until this is resolved.<br>
@@ -177,6 +183,11 @@
         <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#4a9eff; animation:pulse 1.6s infinite;"></span> Ghost Mode Active — Full Lockdown
     </div>
 
+    <div class="controls-title">👁️ Watched Folders (Real-Time)
+        <span title="Watched live for a burst of rapid file changes (possible ransomware) - separate from the 30s scan everything else uses. Fixed to these defaults on purpose: watching more folders (or a whole drive) makes real activity harder to tell apart from normal background noise, and risks Windows silently dropping change notifications under load." style="cursor:help; color:#7b8aa3; font-size:13px; font-weight:400;"> ⓘ</span>
+    </div>
+    <div id="watched-folders-list" style="margin-bottom:16px; font-size:14px; color:#c8d3e8;">Loading...</div>
+
     <div class="token-box">🔑 Token: <span id="token-value">Loading...</span></div>
 
     <div class="events" id="events-section">
@@ -246,6 +257,7 @@ function render(data) {
     const trustLevel = data.trust_level || 0;
 
     document.getElementById('tamper-banner').style.display = data.tamper_detected ? 'block' : 'none';
+    document.getElementById('ransomware-banner').style.display = data.ransomware_alert ? 'block' : 'none';
 
     document.getElementById('last-refresh-time').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
 
@@ -596,9 +608,38 @@ document.getElementById('cmd-overlay').addEventListener('click', (e) => {
     if (e.target.id === 'cmd-overlay') document.getElementById('cmd-overlay').classList.remove('open');
 });
 
+const FOLDER_REASONS = {
+    'documents': 'Highest-value target - the files people would actually pay a ransom to get back.',
+    'desktop': 'Frequently used for active work files and shortcuts to important documents.',
+    'pictures': 'Personal photos are rarely backed up elsewhere and are a common ransomware target.',
+    'downloads': 'Where downloaded files (and malware droppers) land first, before being moved or run.',
+};
+
+function folderReason(path) {
+    const name = path.split('\\').pop().toLowerCase();
+    return FOLDER_REASONS[name] || 'Watched for a burst of rapid file changes.';
+}
+
+async function loadWatchedFolders() {
+    try {
+        const data = await apiFetch('/watched-folders');
+        const el = document.getElementById('watched-folders-list');
+        if (data.folders && data.folders.length) {
+            el.innerHTML = data.folders.map(f =>
+                `<div title="${folderReason(f)}" style="cursor:help;">📁 ${f}</div>`
+            ).join('');
+        } else {
+            el.textContent = 'None configured';
+        }
+    } catch {
+        document.getElementById('watched-folders-list').textContent = '⚠️ Could not load';
+    }
+}
+
 async function init() {
     await fetchToken();
     await refresh();
+    await loadWatchedFolders();
     setInterval(refresh, 10000);
 }
 

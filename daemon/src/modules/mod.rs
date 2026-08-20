@@ -16,6 +16,9 @@ pub mod trust;
 // Behavior-based detection
 pub mod behavior;
 
+// Real-time ransomware-pattern detection (separate from the 30s poll cycle)
+pub mod watcher;
+
 // Tests
 #[cfg(test)]
 mod integrity_tests;
