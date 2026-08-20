@@ -2,15 +2,22 @@
 // This software is proprietary and confidential.
 
 //! Auto-Repair Module — Silent with Safety Levels
-//! - Automatic: Proxy, Defender, UAC, Windows Update, System Restore, SmartScreen, IPv6, RDP
+//! - Automatic: Proxy, Defender, UAC, Windows Update, System Restore, SmartScreen,
+//!   IPv6, RDP, Fake Extensions, Brute Force
 //! - Alert Only: VPN, DoH, LAPS, Event Log
-//! - Confirm Required: DNS, Firewall, HID, BT, Adapter, Startup, Brute Force
-//! - Never Auto (Quarantine): Fake Extensions
+//! - Confirm Required: DNS, Firewall, HID, BT, Adapter, Startup, New Network Devices
 //!
 //! FIX: DNS and Firewall were "automatic" but a plain baseline != current check
 //! can't tell real tampering from a legitimate network change (new Wi-Fi, VPN,
 //! DHCP-assigned DNS) - gate them like the other confirm-required categories so
 //! the daemon stops silently re-fighting the OS's live network config.
+//!
+//! FIX (2026-08-20): RDP, Fake Extensions, and Brute Force moved from
+//! Confirm to Automatic - all three already had real repair actions sitting
+//! behind a one-tap approval; the risk of a legitimate false positive is low
+//! and the cost of the extra tap is real (an attacker with RDP access, or an
+//! active brute-force attempt, doesn't wait for the approval). New Network
+//! Devices moved from Alert to Confirm, since Alert had no action at all.
 
 use std::process::Command;
 use std::os::windows::process::CommandExt;
@@ -426,6 +433,37 @@ pub fn force_disable_unknown_adapters() -> bool {
     run_command(&mut cmd, "Adapter", "Disabled unknown adapters")
 }
 
+/// Blocks (inbound firewall rule, same mechanism as block_bruteforce_ips) only the
+/// LAN device IPs that are new since the baseline - not a blanket block of every
+/// device on the network, which would also cut off the user's own router/phone/
+/// printer. Diffs the current ARP-detected devices against the saved baseline.
+pub fn block_new_network_devices() -> bool {
+    let baseline_devices = match crate::baseline::load_baseline_state() {
+        Ok(state) => state.network_devices,
+        Err(_) => return false,
+    };
+    let current_devices = crate::detect::get_network_devices();
+    let new_devices: Vec<&String> = current_devices.iter()
+        .filter(|ip| !ip.starts_with("ERROR_") && !baseline_devices.contains(ip))
+        .collect();
+
+    if new_devices.is_empty() {
+        return true;
+    }
+
+    let mut all_ok = true;
+    for ip in new_devices {
+        let mut cmd = Command::new("powershell");
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.args(["-NoProfile", "-Command",
+            &format!("New-NetFirewallRule -DisplayName 'TS-Block-Device-{}' -Direction Inbound -RemoteAddress {} -Action Block -ErrorAction SilentlyContinue", ip, ip)]);
+        if !run_command(&mut cmd, "NetworkDevice", &format!("Blocked new device {}", ip)) {
+            all_ok = false;
+        }
+    }
+    all_ok
+}
+
 pub fn clean_unicode_bidi() -> bool {
     let hosts = "C:\\Windows\\System32\\drivers\\etc\\hosts";
     if let Ok(content) = fs::read_to_string(hosts) {
@@ -627,6 +665,13 @@ pub fn execute_confirmed_repair(category: &str) -> String {
                 "Fake extensions quarantined successfully".to_string()
             } else {
                 "Fake extension quarantine failed - check logs".to_string()
+            }
+        }
+        "devices" => {
+            if block_new_network_devices() {
+                "New network device(s) blocked successfully".to_string()
+            } else {
+                "Network device block failed - check logs".to_string()
             }
         }
         _ => format!("Unknown category: {}", category),

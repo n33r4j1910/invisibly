@@ -79,7 +79,7 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
         changes.push((
             "devices".to_string(),
             format!("New network devices: {:?}", current.network_devices),
-            "alert".to_string()
+            "confirm".to_string()  // FIX 2026-08-20: was alert (no action possible) - now confirm, blocks the new IP(s) on approval
         ));
     }
 
@@ -241,7 +241,7 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
         changes.push((
             "fakeext".to_string(),
             format!("Fake extensions: {:?}", current.fake_extensions),
-            "confirm".to_string()
+            "automatic".to_string()  // FIX 2026-08-20: was confirm - near-zero false-positive rate, quarantine is reversible
         ));
     }
 
@@ -297,7 +297,7 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
         changes.push((
             "bruteforce".to_string(),
             current.login_failures.clone(), // Pass raw value
-            "confirm".to_string()
+            "automatic".to_string()  // FIX 2026-08-20: was confirm - blocking an IP hammering failed logons is standard, low-risk behavior
         ));
     }
 
@@ -385,7 +385,7 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
         changes.push((
             "rdp".to_string(),
             current.rdp_status.clone(), // Pass raw value
-            "confirm".to_string()  // FIX: Changed from "automatic" to "confirm"
+            "automatic".to_string()  // FIX 2026-08-20: back to automatic - unexpected RDP enablement is a strong compromise signal, low downside to auto-disabling
         ));
     }
 

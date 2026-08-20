@@ -19,3 +19,5 @@ pub mod behavior;
 // Tests
 #[cfg(test)]
 mod integrity_tests;
+#[cfg(test)]
+mod trust_tests;

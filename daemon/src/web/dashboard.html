@@ -107,6 +107,12 @@
     </h1>
     <div class="subtitle">Autonomous endpoint security agent — Silent · Dashboard-only alerts</div>
 
+    <div id="tamper-banner" style="display:none; background:#3a0f14; border:1px solid #e0405a; color:#ff8a9a; border-radius:10px; padding:14px 18px; margin-bottom:16px; font-size:14px; line-height:1.5;">
+        <strong>🔴 Security alert: Invisibly's own executable does not match its last known-good signature.</strong><br>
+        This could mean the app was tampered with, or corrupted during an update. Auto-repair is disabled until this is resolved.<br>
+        <strong>What to do:</strong> reinstall Invisibly from the Microsoft Store. If this keeps happening after a clean reinstall, do not trust this machine's protection until it's investigated.
+    </div>
+
     <div class="info-box">
         <strong>🟢 System Health:</strong> Current state of all controls.<br>
         <strong>🔵 Trust Level:</strong> Historical confidence (0–100). Slowly recovers, drops on significant events.
@@ -238,6 +244,8 @@ function render(data) {
     const score = data.integrity_score || 0;
     const state = data.integrity_state || 'Unknown';
     const trustLevel = data.trust_level || 0;
+
+    document.getElementById('tamper-banner').style.display = data.tamper_detected ? 'block' : 'none';
 
     document.getElementById('last-refresh-time').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
 
@@ -537,6 +545,10 @@ const MANUAL_COMMANDS = [
         'Get-ChildItem "$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup"' ] },
     { title: 'fakeext \u2014 review before touching', desc: 'No longer auto-quarantined - lists double-extension files (e.g. invoice.pdf.exe) on your Desktop/Downloads so you can review before removing.', cmds: [
         'Get-ChildItem "$env:USERPROFILE\\Desktop","$env:USERPROFILE\\Downloads" | Where-Object { $_.Name -match "\\.(pdf|doc|jpg|txt)\\.exe$" -or $_.Name -match "\\.exe\\." }' ] },
+    { title: 'tasks \u2014 review before touching', desc: 'Invisibly has no revert capability for scheduled tasks yet - it accepts the current list as the new trusted baseline instead of lying about a repair. Lists active scheduled tasks so you can review what changed yourself.', cmds: [
+        "Get-ScheduledTask | Where-Object {$_.State -ne 'Disabled'} | Select-Object -ExpandProperty TaskName | Sort-Object" ] },
+    { title: 'services \u2014 review before touching', desc: 'Same as tasks: no revert capability yet, the current list is accepted as the new baseline. Lists running automatic-start services so you can review what changed yourself.', cmds: [
+        "Get-Service | Where-Object {$_.Status -eq 'Running' -and $_.StartType -eq 'Automatic'} | Select-Object -ExpandProperty Name | Sort-Object" ] },
 ];
 
 function renderCommands() {

@@ -13,7 +13,7 @@
     <DisplayName>Invisibly</DisplayName>
     <PublisherDisplayName>Neeraj Rathod</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
-    <Description>Autonomous endpoint security agent. Detects 38 threats, auto-repairs 26. 100% offline. No cloud. No telemetry.</Description>
+    <Description>Endpoint security agent. Monitors 35 Windows security signals; auto-repairs 15 automatically and 7 more with one-tap approval. 100% offline. No cloud. No telemetry.</Description>
   </Properties>
   
   <Dependencies>

@@ -105,6 +105,36 @@ pub fn get_integrity_report() -> Option<IntegrityReport> {
 }
 
 // ============================================
+// ELEVATION STATE (for tray UX - see run_daemon())
+// ============================================
+
+static ELEVATED: AtomicBool = AtomicBool::new(true);
+
+pub fn set_elevated(elevated: bool) {
+    ELEVATED.store(elevated, Ordering::Release);
+}
+
+pub fn is_elevated() -> bool {
+    ELEVATED.load(Ordering::Acquire)
+}
+
+// ============================================
+// TAMPER DETECTION (self-integrity) - reflects the current check result,
+// same as ELEVATED/GHOST_ACTIVE above. This is the one state the tool
+// surfaces to a human instead of silently auto-repairing.
+// ============================================
+
+static TAMPER_DETECTED: AtomicBool = AtomicBool::new(false);
+
+pub fn set_tamper_detected(detected: bool) {
+    TAMPER_DETECTED.store(detected, Ordering::Release);
+}
+
+pub fn is_tamper_detected() -> bool {
+    TAMPER_DETECTED.load(Ordering::Acquire)
+}
+
+// ============================================
 // TRUST LEVEL
 // ============================================
 
@@ -420,15 +450,19 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                 let score = report.as_ref().map(|r| r.score).unwrap_or(0);
                 let state_str = report.as_ref().map(|r| format!("{:?}", r.state)).unwrap_or_else(|| "Unknown".to_string());
                 let trust_level = get_trust_level();
+                let elevated = is_elevated();
+                let tamper_detected = is_tamper_detected();
 
                 json_response(200, &format!(
-                    r#"{{"status":"ok","trust_state":"{}","ghost":{},"enabled":{},"integrity_score":{},"integrity_state":"{}","trust_level":{}}}"#,
+                    r#"{{"status":"ok","trust_state":"{}","ghost":{},"enabled":{},"integrity_score":{},"integrity_state":"{}","trust_level":{},"elevated":{},"tamper_detected":{}}}"#,
                     trust_state,
                     ghost,
                     enabled,
                     score,
                     state_str,
-                    trust_level
+                    trust_level,
+                    elevated,
+                    tamper_detected
                 ))
             }
             ("GET", "/dashboard") => {
@@ -444,13 +478,17 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                     let report = get_integrity_report();
                     let score = report.as_ref().map(|r| r.score).unwrap_or(0);
                     let trust_level = get_trust_level();
+                    let elevated = is_elevated();
+                    let tamper_detected = is_tamper_detected();
                     json_response(200, &format!(
-                        r#"{{"trust_state":"{}","ghost":{},"enabled":{},"integrity_score":{},"trust_level":{}}}"#,
+                        r#"{{"trust_state":"{}","ghost":{},"enabled":{},"integrity_score":{},"trust_level":{},"elevated":{},"tamper_detected":{}}}"#,
                         trust_state,
                         ghost,
                         enabled,
                         score,
-                        trust_level
+                        trust_level,
+                        elevated,
+                        tamper_detected
                     ))
                 }
             }

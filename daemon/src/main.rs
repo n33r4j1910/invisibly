@@ -23,6 +23,7 @@ use modules::behavior;
 
 const DATA_DIR: &str = "C:\\ProgramData\\Invisibly";
 const SCHEDULED_TASK_NAME: &str = "InvisiblyDaemon";
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 // ============================================
 // GLOBAL BASELINE (Shared across threads)
@@ -83,6 +84,7 @@ fn ensure_scheduled_task() -> bool {
     // Check if task already exists with correct path
     let check_output = Command::new("schtasks")
         .args(["/query", "/tn", SCHEDULED_TASK_NAME, "/fo", "csv", "/v"])
+        .creation_flags(CREATE_NO_WINDOW)
         .output();
 
     let task_exists = if let Ok(output) = &check_output {
@@ -94,6 +96,7 @@ fn ensure_scheduled_task() -> bool {
     let task_path_matches = if task_exists {
         if let Ok(output) = Command::new("schtasks")
             .args(["/query", "/tn", SCHEDULED_TASK_NAME, "/fo", "csv", "/v"])
+            .creation_flags(CREATE_NO_WINDOW)
             .output() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             stdout.contains(exe_str.as_ref()) || stdout.contains("invisibly-daemon.exe")
@@ -114,6 +117,7 @@ fn ensure_scheduled_task() -> bool {
     if task_exists {
         let _ = Command::new("schtasks")
             .args(["/delete", "/tn", SCHEDULED_TASK_NAME, "/f"])
+            .creation_flags(CREATE_NO_WINDOW)
             .output();
     }
 
@@ -124,6 +128,7 @@ fn ensure_scheduled_task() -> bool {
 
     let output = Command::new("cmd")
         .args(["/c", &create_cmd])
+        .creation_flags(CREATE_NO_WINDOW)
         .output();
 
     match output {
@@ -195,6 +200,7 @@ fn auto_fix_startup_issues() {
 fn start_tray_if_not_running() {
     let output = Command::new("tasklist")
         .args(["/FI", "IMAGENAME eq invisibly-tray.exe"])
+        .creation_flags(CREATE_NO_WINDOW)
         .output();
 
     if let Ok(output) = output {
@@ -231,6 +237,7 @@ fn run_daemon() {
     auto_fix_startup_issues();
 
     let is_elevated_now = is_elevated();
+    server::set_elevated(is_elevated_now);
     if !is_elevated_now {
         println!("⚠️ Running unelevated. Attempting to create Scheduled Task for elevation...");
         if ensure_scheduled_task() {
@@ -268,13 +275,18 @@ fn run_daemon() {
         println!("   ⛔ Auto-repair disabled. Manual verification required.");
         log_self_integrity_failure();
         trust::deduct_trust("Self-integrity check failed - executable modified", 40);
+        server::set_tamper_detected(true);
+    } else {
+        server::set_tamper_detected(false);
     }
 
-    let baseline = get_baseline();
-    let home_ssid = config::load_home_ssid().unwrap_or_else(|| "Unknown".into());
-
+    // FIX: Start the API server BEFORE the (potentially slow, first-run)
+    // baseline collection below - collect_state() shells out to 30+ PowerShell
+    // calls and can take longer than the tray's failure threshold, so binding
+    // the port first stops the tray from thinking the daemon is dead and
+    // launching a duplicate instance while the real one is still starting.
     println!("🔌 Starting API server on port 12790...");
-    
+
     let api_handle = std::thread::spawn(|| {
         if let Err(e) = server::run() {
             eprintln!("❌ API server error: {}", e);
@@ -296,7 +308,14 @@ fn run_daemon() {
     std::thread::spawn(|| {
         loop {
             std::thread::sleep(Duration::from_secs(30));
+
+            // AUTO-RECOVERY: re-create the Scheduled Task if it was deleted or
+            // disabled mid-session, not just at startup. ensure_scheduled_task()
+            // already no-ops quickly when the task is present and correct.
+            ensure_scheduled_task();
+
             let self_ok = check_self_integrity();
+            server::set_tamper_detected(!self_ok);
             let baseline_ok = baseline::verify_baseline().valid;
             if !self_ok || !baseline_ok {
                 println!("🚨 30s heartbeat: integrity check FAILED (self: {}, baseline: {})", self_ok, baseline_ok);
@@ -373,6 +392,9 @@ fn run_daemon() {
     println!("✅ API server started - Dashboard: http://127.0.0.1:12790");
     println!("");
 
+    let baseline = get_baseline();
+    let home_ssid = config::load_home_ssid().unwrap_or_else(|| "Unknown".into());
+
     println!("🔍 [1/6] Collecting state...");
     let current = detect::collect_state();
     println!("✅ [1/6] State collected");
@@ -431,6 +453,20 @@ fn run_daemon() {
         let is_baseline_valid = baseline_status.valid;
 
         if !is_baseline_valid {
+            // AUTO-RECOVERY: an invalid baseline usually means real tampering,
+            // but if the master key is genuinely readable AND the executable
+            // itself is untampered, this is far more likely an infrastructure
+            // hiccup (e.g. a stale signature from a temporary key/ACL issue)
+            // than an attack - regenerate instead of draining trust forever.
+            if baseline_status.exists && crypto::key_read_healthy() && check_self_integrity() {
+                println!("🔧 Auto-recovery: baseline invalid but key is healthy and executable is untampered - regenerating baseline");
+                let state = detect::collect_state();
+                if baseline::create_baseline(&state).is_ok() {
+                    let mut guard = BASELINE.lock().unwrap();
+                    *guard = Some(state);
+                    continue;
+                }
+            }
             println!("❌ Baseline integrity check failed!");
             trust::deduct_trust("Baseline integrity check failed", 25);
             let report = integrity::calculate(&[], false, false);
@@ -463,6 +499,7 @@ fn run_daemon() {
                                 "ipv6" => repair::enable_ipv6(),
                                 "wifi_profile" => repair::set_wifi_private(),
                                 "trojan_source" => repair::clean_unicode_bidi(),
+                                "rdp" => repair::disable_rdp(),
                                 "startup" => { repair::quarantine_startup(); true }
                                 "fakeext" => { repair::delete_fake_files(); true }
                                 "bt" => { repair::force_disable_bt_devices(); true }

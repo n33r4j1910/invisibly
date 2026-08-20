@@ -17,6 +17,8 @@ use windows::core::w;
 // FIX #29: WM_TASKBARCREATED message for explorer restart
 const WM_TASKBARCREATED: u32 = 0x0400 + 1;
 
+fn default_true() -> bool { true }
+
 #[derive(Debug, Deserialize)]
 struct DaemonStatus {
     #[serde(default)]
@@ -30,6 +32,15 @@ struct DaemonStatus {
     integrity_state: Option<String>,
     #[serde(default)]
     trust_level: Option<u8>,
+    // Whether the daemon has admin rights - without it, auto-repair is
+    // silently skipped. Defaults to true so an older daemon build that
+    // doesn't send this field doesn't wrongly trigger the warning.
+    #[serde(default = "default_true")]
+    elevated: bool,
+    // The daemon's own executable failed its self-integrity check - the one
+    // state that must be surfaced to the user, never silently auto-repaired.
+    #[serde(default)]
+    tamper_detected: bool,
 }
 
 #[derive(Debug)]
@@ -167,12 +178,36 @@ fn call_approve(category: &str) -> bool {
 }
 
 // ============================================
-// FIX: Tray supervises the daemon
+// NOTIFICATIONS - fired only on real state transitions (see StatusUpdate),
+// not on every poll, so the tool stays quiet unless something needs attention.
+// Uses WinForms balloon tips via PowerShell rather than WinRT toast APIs -
+// no new dependency, no AUMID/package-identity setup, same Command::new
+// pattern already used throughout this codebase.
 // ============================================
+
+fn show_notification(title: &str, message: &str, is_warning: bool) {
+    let icon = if is_warning { "Warning" } else { "Info" };
+    let script = format!(
+        "Add-Type -AssemblyName System.Windows.Forms; \
+         $n = New-Object System.Windows.Forms.NotifyIcon; \
+         $n.Icon = [System.Drawing.SystemIcons]::Shield; \
+         $n.Visible = $true; \
+         Start-Sleep -Milliseconds 300; \
+         $n.ShowBalloonTip(6000, '{}', '{}', [System.Windows.Forms.ToolTipIcon]::{}); \
+         Start-Sleep -Seconds 7; \
+         $n.Dispose()",
+        title.replace('\'', "''"), message.replace('\'', "''"), icon
+    );
+    let _ = process::Command::new("powershell")
+        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &script])
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn();
+}
 
 fn is_daemon_running() -> bool {
     let output = process::Command::new("tasklist")
         .args(["/FI", "IMAGENAME eq invisibly-daemon.exe"])
+        .creation_flags(CREATE_NO_WINDOW)
         .output();
     if let Ok(output) = output {
         String::from_utf8_lossy(&output.stdout).contains("invisibly-daemon.exe")
@@ -216,6 +251,7 @@ fn create_circle_icon(r: u8, g: u8, b: u8) -> Icon {
 fn open_dashboard() {
     let _ = std::process::Command::new("cmd")
         .args(["/c", "start", "http://127.0.0.1:12790/dashboard"])
+        .creation_flags(CREATE_NO_WINDOW)
         .spawn();
 }
 
@@ -223,6 +259,9 @@ struct TrayApp {
     tray: Option<TrayIcon>,
     icons: Arc<(Icon, Icon, Icon, Icon, Icon)>,
     proxy: winit::event_loop::EventLoopProxy<UserEvent>,
+    approve_item: Option<MenuItem>,
+    last_pending_count: usize,
+    last_tamper_state: bool,
 }
 
 impl ApplicationHandler<UserEvent> for TrayApp {
@@ -266,6 +305,7 @@ impl ApplicationHandler<UserEvent> for TrayApp {
 
         println!("✅ Tray icon created");
         self.tray = Some(tray);
+        self.approve_item = Some(approve_item);
     }
 
     fn window_event(
@@ -327,6 +367,23 @@ impl ApplicationHandler<UserEvent> for TrayApp {
             }
             UserEvent::StatusUpdate(status) => {
                 println!("🔄 StatusUpdate event received");
+
+                let pending_count = get_pending_categories().len();
+                if let Some(approve_item) = &self.approve_item {
+                    approve_item.set_text(format!("Approve Pending Changes ({})", pending_count));
+                }
+                if pending_count > self.last_pending_count {
+                    show_notification("Invisibly", &format!("{} change(s) need your approval - open the tray menu to review.", pending_count), false);
+                }
+                self.last_pending_count = pending_count;
+
+                if let Some(s) = &status {
+                    if s.tamper_detected && !self.last_tamper_state {
+                        show_notification("Invisibly - Security Alert", "The app's own executable failed its integrity check. Open the dashboard for details.", true);
+                    }
+                    self.last_tamper_state = s.tamper_detected;
+                }
+
                 if let Some(tray) = &self.tray {
                     let (icon, tooltip) = match status {
                         Some(s) => {
@@ -334,9 +391,13 @@ impl ApplicationHandler<UserEvent> for TrayApp {
                                      s.integrity_score, s.integrity_state, s.ghost, s.enabled);
                             
                             // FIX: Check GHOST MODE FIRST
-                            if s.ghost {
-                                (self.icons.3.clone(), format!("🔵 Ghost Mode Active - {}%\nRight-click for menu", 
+                            if s.tamper_detected {
+                                (self.icons.2.clone(), "🔴 SECURITY ALERT - executable may be tampered\nOpen Dashboard for details".to_string())
+                            } else if s.ghost {
+                                (self.icons.3.clone(), format!("🔵 Ghost Mode Active - {}%\nRight-click for menu",
                                     s.integrity_score.unwrap_or(0)))
+                            } else if !s.elevated {
+                                (self.icons.4.clone(), "⚠️ Limited Protection - Restart to enable auto-repair\nRight-click for menu".to_string())
                             } else {
                                 // Then check integrity score for color
                                 match s.integrity_score {
@@ -486,6 +547,9 @@ fn main() {
         tray: None,
         icons: icons.clone(),
         proxy: event_loop.create_proxy(),
+        approve_item: None,
+        last_pending_count: 0,
+        last_tamper_state: false,
     };
 
     println!("🚀 Running event loop...");

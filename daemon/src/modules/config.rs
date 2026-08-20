@@ -30,11 +30,34 @@ pub fn ensure_data_dir() -> std::io::Result<()> {
     fs::create_dir_all(format!("{}\\canary", DATA_DIR))?;
     fs::create_dir_all(format!("{}\\backups", DATA_DIR))?;
     
-    // === ACL HARDENING: Restrict access to SYSTEM and Administrators ===
+    // === ACL HARDENING: Restrict access to SYSTEM, Administrators, and the
+    // current user. The app runs unelevated as a normal, expected state
+    // (monitor-only mode before the Scheduled Task takes over) - without an
+    // explicit grant for the current user, that user's own unelevated runs
+    // can no longer read files (like the master key) that a prior elevated
+    // run wrote, silently breaking self-integrity/baseline verification. ===
     #[cfg(windows)]
     {
+        let username = std::env::var("USERNAME").unwrap_or_default();
+        // /T recurses into existing files/subfolders - without it, only the
+        // directory's own ACL changes and files created by an earlier icacls
+        // run (which have their own explicit, non-inherited ACL) are untouched.
+        let mut args: Vec<String> = vec![
+            DATA_DIR.to_string(), "/T".to_string(), "/inheritance:r".to_string(),
+            "/grant".to_string(), "SYSTEM:F".to_string(),
+            "/grant".to_string(), "Administrators:F".to_string(),
+        ];
+        if !username.is_empty() {
+            args.push("/grant".to_string());
+            args.push(format!("{}:F", username));
+        }
+        args.push("/remove".to_string());
+        args.push("Users".to_string());
+        args.push("/remove".to_string());
+        args.push("Everyone".to_string());
+
         let result = std::process::Command::new("icacls")
-            .args([DATA_DIR, "/inheritance:r", "/grant", "SYSTEM:F", "/grant", "Administrators:F", "/remove", "Users", "/remove", "Everyone"])
+            .args(&args)
             .status();
         
         match result {
