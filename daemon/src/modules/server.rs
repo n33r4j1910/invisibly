@@ -4,7 +4,10 @@
 //! Local HTTP API Server — Hybrid with Integrity Score + Trust Level
 use std::io::prelude::*;
 use std::net::{TcpListener, TcpStream};
+use std::os::windows::process::CommandExt;
 use std::fs;
+
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::path::Path;
@@ -32,20 +35,6 @@ const TOKEN_COUNTER_FILE: &str = "C:\\ProgramData\\Invisibly\\token_counter.txt"
 // ============================================
 
 static ACTIVE_CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
-
-fn track_connection<F, T>(f: F) -> T
-where
-    F: FnOnce() -> T,
-{
-    let current = ACTIVE_CONNECTIONS.fetch_add(1, Ordering::SeqCst);
-    if current >= MAX_CONCURRENT_CONNECTIONS {
-        ACTIVE_CONNECTIONS.fetch_sub(1, Ordering::SeqCst);
-        return std::panic::resume_unwind(Box::new("Too many connections"));
-    }
-    let result = f();
-    ACTIVE_CONNECTIONS.fetch_sub(1, Ordering::SeqCst);
-    result
-}
 
 // ============================================
 // TRUST STATE (Legacy)
@@ -293,30 +282,30 @@ pub fn rollback_changes() -> String {
         matches!(out, Ok(o) if o.status.success())
     };
 
-    let ok = ran_ok(std::process::Command::new("powershell")
+    let ok = ran_ok(std::process::Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile", "-Command", "Set-NetFirewallProfile -All -DefaultInboundAction Allow; Set-NetFirewallProfile -All -DefaultOutboundAction Allow"])
         .output());
     results.push(if ok { "Firewall reset to default".to_string() } else { "Firewall reset FAILED".to_string() });
 
-    let ok = ran_ok(std::process::Command::new("powershell")
+    let ok = ran_ok(std::process::Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile", "-Command",
             "Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -Name ProxyServer -ErrorAction SilentlyContinue; Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -Name ProxyEnable -ErrorAction SilentlyContinue"])
         .output());
     results.push(if ok { "Proxy removed".to_string() } else { "Proxy removal FAILED".to_string() });
 
-    let ok = ran_ok(std::process::Command::new("powershell")
+    let ok = ran_ok(std::process::Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile", "-Command",
             "Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | ForEach-Object { Set-DnsClientServerAddress -InterfaceIndex $_.ifIndex -ResetServerAddresses }"])
         .output());
     results.push(if ok { "DNS reset to DHCP (active adapter)".to_string() } else { "DNS reset FAILED".to_string() });
 
-    let ok = ran_ok(std::process::Command::new("powershell")
+    let ok = ran_ok(std::process::Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile", "-Command", "Set-MpPreference -DisableRealtimeMonitoring $false"])
         .output());
     results.push(if ok { "Defender re-enabled".to_string() } else { "Defender re-enable FAILED".to_string() });
 
     if is_ghost_active() {
-        let ok = ran_ok(std::process::Command::new("powershell")
+        let ok = ran_ok(std::process::Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
             .args(["-NoProfile", "-Command",
                 "Get-NetFirewallRule -DisplayName 'TS-VPN-Only' -ErrorAction SilentlyContinue | Remove-NetFirewallRule;",
                 "Get-NetFirewallRule -DisplayName 'TS-Block-ICMP' -ErrorAction SilentlyContinue | Remove-NetFirewallRule;",
@@ -610,6 +599,8 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                 } else {
                     let reason = parse_request_body(&request, "reason").unwrap_or_else(|| "API request".to_string());
                     crate::modules::trust::manual_verify_with_reason(&reason, "dashboard-user");
+                    // FIX: Sync the atomic immediately after trust mutation
+                    set_trust_level(crate::modules::trust::get_trust_score());
                     let trust_level = get_trust_level();
                     json_response(200, &format!(
                         r#"{{"status":"ok","trust_level":{}}}"#,

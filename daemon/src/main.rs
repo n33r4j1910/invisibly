@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 use std::time::Duration;
 use std::fs;
 use std::ffi::OsString;
@@ -19,18 +21,8 @@ use modules::baseline;
 use modules::trust;
 use modules::behavior;
 
-use windows_service::{
-    define_windows_service,
-    service::{
-        ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState,
-        ServiceStatus, ServiceType,
-    },
-    service_control_handler::{self, ServiceControlHandlerResult},
-    service_dispatcher,
-};
-
 const DATA_DIR: &str = "C:\\ProgramData\\Invisibly";
-const SERVICE_NAME: &str = "InvisiblyDaemon";
+const SCHEDULED_TASK_NAME: &str = "InvisiblyDaemon";
 
 // ============================================
 // GLOBAL BASELINE (Shared across threads)
@@ -78,55 +70,84 @@ fn get_baseline() -> detect::SystemState {
 }
 
 // ============================================
-// WINDOWS SERVICE ENTRY POINT
+// SCHEDULED TASK MANAGEMENT
 // ============================================
 
-define_windows_service!(ffi_service_main, service_main);
+fn ensure_scheduled_task() -> bool {
+    let exe_path = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    let exe_str = exe_path.to_string_lossy();
 
-fn service_main(_arguments: Vec<OsString>) {
-    let status_handle = service_control_handler::register(
-        SERVICE_NAME,
-        |control_event| {
-            match control_event {
-                ServiceControl::Stop | ServiceControl::Shutdown => {
-                    std::process::exit(0);
-                }
-                _ => ServiceControlHandlerResult::NotImplemented,
-            }
-        },
-    ).expect("Failed to register service control handler");
+    // Check if task already exists with correct path
+    let check_output = Command::new("schtasks")
+        .args(["/query", "/tn", SCHEDULED_TASK_NAME, "/fo", "csv", "/v"])
+        .output();
 
-    status_handle.set_service_status(ServiceStatus {
-        service_type: ServiceType::OWN_PROCESS,
-        current_state: ServiceState::Running,
-        controls_accepted: ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN,
-        exit_code: ServiceExitCode::Win32(0),
-        process_id: None,
-        checkpoint: 0,
-        wait_hint: Duration::default(),
-    }).expect("Failed to set service status");
+    let task_exists = if let Ok(output) = &check_output {
+        String::from_utf8_lossy(&output.stdout).contains(SCHEDULED_TASK_NAME)
+    } else {
+        false
+    };
 
-    run_daemon();
+    let task_path_matches = if task_exists {
+        if let Ok(output) = Command::new("schtasks")
+            .args(["/query", "/tn", SCHEDULED_TASK_NAME, "/fo", "csv", "/v"])
+            .output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            stdout.contains(exe_str.as_ref()) || stdout.contains("invisibly-daemon.exe")
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    if task_exists && task_path_matches {
+        println!("✅ Scheduled Task already exists with correct path");
+        return true;
+    }
+
+    println!("🔄 Creating/updating Scheduled Task with current path: {}", exe_str);
+
+    if task_exists {
+        let _ = Command::new("schtasks")
+            .args(["/delete", "/tn", SCHEDULED_TASK_NAME, "/f"])
+            .output();
+    }
+
+    let create_cmd = format!(
+        "schtasks /create /tn \"{}\" /tr \"{}\" /sc onlogon /rl highest /f",
+        SCHEDULED_TASK_NAME, exe_str
+    );
+
+    let output = Command::new("cmd")
+        .args(["/c", &create_cmd])
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => {
+            println!("✅ Scheduled Task created successfully");
+            true
+        }
+        Ok(o) => {
+            let stderr = String::from_utf8_lossy(&o.stderr);
+            println!("❌ Failed to create Scheduled Task: {}", stderr);
+            false
+        }
+        Err(e) => {
+            println!("❌ Failed to create Scheduled Task: {}", e);
+            false
+        }
+    }
 }
 
 // ============================================
-// MAIN - Entry point
+// MAIN - Entry point (No service dispatcher)
 // ============================================
 
 fn main() {
-    #[cfg(windows)]
-    {
-        use windows::Win32::System::Console::GetConsoleWindow;
-        let console_window = unsafe { GetConsoleWindow() };
-        let has_console = !console_window.0.is_null();
-        
-        if !has_console {
-            service_dispatcher::start(SERVICE_NAME, ffi_service_main)
-                .expect("Failed to start service dispatcher");
-            return;
-        }
-    }
-
     run_daemon();
 }
 
@@ -162,6 +183,9 @@ fn auto_fix_startup_issues() {
             let _ = fs::remove_file(&timeline_path);
         }
     }
+
+    // 3. Prune timeline to prevent unbounded growth
+    timeline::prune_old_entries();
 }
 
 // ============================================
@@ -169,7 +193,6 @@ fn auto_fix_startup_issues() {
 // ============================================
 
 fn start_tray_if_not_running() {
-    // Check if tray is already running
     let output = Command::new("tasklist")
         .args(["/FI", "IMAGENAME eq invisibly-tray.exe"])
         .output();
@@ -182,7 +205,6 @@ fn start_tray_if_not_running() {
         }
     }
 
-    // Find tray executable
     let tray_path = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|parent| parent.join("invisibly-tray.exe")))
@@ -190,7 +212,7 @@ fn start_tray_if_not_running() {
 
     if let Some(tray_path) = tray_path {
         match std::process::Command::new(tray_path)
-            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .creation_flags(0x08000000)
             .spawn() {
             Ok(_) => println!("✅ Tray started automatically"),
             Err(e) => println!("⚠️ Failed to start tray: {}", e),
@@ -205,13 +227,22 @@ fn start_tray_if_not_running() {
 // ============================================
 
 fn run_daemon() {
-    // START: Auto-start tray
     start_tray_if_not_running();
     auto_fix_startup_issues();
 
-    if !is_elevated() {
-        println!("⚠️ WARNING: Running unelevated. Auto-repair may fail!");
-        println!("   Please run as Administrator for full protection.");
+    let is_elevated_now = is_elevated();
+    if !is_elevated_now {
+        println!("⚠️ Running unelevated. Attempting to create Scheduled Task for elevation...");
+        if ensure_scheduled_task() {
+            println!("✅ Scheduled Task created. Daemon will run elevated on next login.");
+            println!("💡 For now, running in monitor-only mode.");
+            println!("   Auto-repair will work after next login or restart.");
+        } else {
+            println!("⚠️ Could not create Scheduled Task. Running in monitor-only mode.");
+        }
+    } else {
+        println!("✅ Running with elevated privileges.");
+        ensure_scheduled_task();
     }
 
     if let Err(e) = config::ensure_data_dir() {
@@ -372,7 +403,7 @@ fn run_daemon() {
     println!("");
 
     // ============================================
-    // MAIN MONITORING LOOP — WITH AUTO-REPAIR
+    // MAIN MONITORING LOOP
     // ============================================
     loop {
         while !server::is_ts2_enabled() {
@@ -393,7 +424,7 @@ fn run_daemon() {
             continue;
         }
 
-        let baseline = get_baseline();
+        let mut baseline = get_baseline();
         let current = detect::collect_state();
 
         let baseline_status = baseline::verify_baseline();
@@ -410,34 +441,49 @@ fn run_daemon() {
 
         let issues = behavior::detect_all_changes(&baseline, &current);
 
-        // ============================================
-        // AUTO-REPAIR: Process ALL changes
-        // ============================================
         if !issues.is_empty() {
             println!("⚠️ Found {} changes!", issues.len());
+            let mut baseline_synced = false;
 
             for (category, details, action_type) in &issues {
                 match action_type.as_str() {
                     "automatic" => {
-                        let success = match category.as_str() {
-                            "hosts" => repair::restore_hosts(),
-                            "proxy" => repair::remove_proxy(),
-                            "defender" => repair::enable_defender(),
-                            "uac" => repair::enable_uac(),
-                            "wu" => repair::enable_windows_update(),
-                            "sr" => repair::enable_system_restore(),
-                            "smartscreen" => repair::enable_smart_screen(),
-                            "ipv6" => repair::enable_ipv6(),
-                            "wifi_profile" => repair::set_wifi_private(),
-                            "trojan_source" => repair::clean_unicode_bidi(),
-                            // NEW: Auto-repair quarantine categories
-                            "startup" => { repair::quarantine_startup(); true }
-                            "fakeext" => { repair::delete_fake_files(); true }
-                            "bt" => { repair::force_disable_bt_devices(); true }
-                            "hid" => { repair::force_disable_hid_devices(); true }
-                            "bruteforce" => { repair::block_bruteforce_ips(); true }
-                            "adapter" => { repair::force_disable_unknown_adapters(); true }
-                            _ => true,
+                        let success = if !is_elevated_now {
+                            println!("⚠️ Skipping {} repair - not elevated", category);
+                            true
+                        } else {
+                            match category.as_str() {
+                                "hosts" => repair::restore_hosts(),
+                                "proxy" => repair::remove_proxy(),
+                                "defender" => repair::enable_defender(),
+                                "uac" => repair::enable_uac(),
+                                "wu" => repair::enable_windows_update(),
+                                "sr" => repair::enable_system_restore(),
+                                "smartscreen" => repair::enable_smart_screen(),
+                                "ipv6" => repair::enable_ipv6(),
+                                "wifi_profile" => repair::set_wifi_private(),
+                                "trojan_source" => repair::clean_unicode_bidi(),
+                                "startup" => { repair::quarantine_startup(); true }
+                                "fakeext" => { repair::delete_fake_files(); true }
+                                "bt" => { repair::force_disable_bt_devices(); true }
+                                "hid" => { repair::force_disable_hid_devices(); true }
+                                "bruteforce" => { repair::block_bruteforce_ips(); true }
+                                "adapter" => { repair::force_disable_unknown_adapters(); true }
+                                // No revert capability for tasks/services yet - accept
+                                // current state as the new baseline instead of lying
+                                // about a repair that never happened.
+                                "tasks" => {
+                                    baseline.scheduled_tasks = current.scheduled_tasks.clone();
+                                    baseline_synced = true;
+                                    true
+                                }
+                                "services" => {
+                                    baseline.services_list = current.services_list.clone();
+                                    baseline_synced = true;
+                                    true
+                                }
+                                _ => true,
+                            }
                         };
                         if !success {
                             println!("❌ Auto-repair failed for: {}", category);
@@ -465,9 +511,12 @@ fn run_daemon() {
                 }
             }
 
-            // ============================================
-            // AUTO-RESET BASELINE AFTER REPAIRS
-            // ============================================
+            if baseline_synced {
+                let _ = baseline::create_baseline(&baseline);
+                let mut guard = BASELINE.lock().unwrap();
+                *guard = Some(baseline.clone());
+            }
+
             let current_after_repair = detect::collect_state();
             let issues_after = behavior::detect_all_changes(&baseline, &current_after_repair);
 
@@ -477,6 +526,9 @@ fn run_daemon() {
                 let _ = baseline::create_baseline(&state);
                 let mut guard = BASELINE.lock().unwrap();
                 *guard = Some(state);
+                // FIX: Use tiered recovery, not manual_verify
+                trust::recover_trust(5);
+                server::set_trust_level(trust::get_trust_score());
             } else {
                 println!("⚠️ Issues remain after auto-repair: {}", issues_after.len());
                 for (cat, _, _) in &issues_after {
@@ -485,9 +537,6 @@ fn run_daemon() {
             }
         }
 
-        // ============================================
-        // RECALCULATE SCORE
-        // ============================================
         let current_after_full = detect::collect_state();
         let issues_final = behavior::detect_all_changes(&baseline, &current_after_full);
         let is_lockdown = repair::is_ghost_active();
@@ -542,19 +591,48 @@ fn run_daemon() {
 // HELPERS
 // ============================================
 
+// FIX: Reliable elevation check using Windows API
 fn is_elevated() -> bool {
-    let output = Command::new("whoami")
-        .args(["/priv"])
-        .output();
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Security::TOKEN_QUERY;
+    use windows::Win32::Security::TokenElevation;
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
-    if let Ok(output) = output {
-        if let Ok(text) = String::from_utf8(output.stdout) {
-            return text.contains("SeIncreaseQuotaPrivilege") ||
-                   text.contains("SeSecurityPrivilege") ||
-                   text.contains("SeTakeOwnershipPrivilege");
-        }
+    let process = unsafe { GetCurrentProcess() };
+    let mut token_handle = HANDLE::default();
+
+    let token_result = unsafe {
+        OpenProcessToken(
+            process,
+            TOKEN_QUERY,
+            &mut token_handle,
+        )
+    };
+
+    if token_result.is_err() || token_handle.is_invalid() {
+        return false;
     }
-    false
+
+    let mut elevation: windows::Win32::Security::TOKEN_ELEVATION = unsafe { std::mem::zeroed() };
+    let mut return_length = 0;
+
+    let info_result = unsafe {
+        windows::Win32::Security::GetTokenInformation(
+            token_handle,
+            TokenElevation,
+            Some(&mut elevation as *mut _ as *mut std::ffi::c_void),
+            std::mem::size_of::<windows::Win32::Security::TOKEN_ELEVATION>() as u32,
+            &mut return_length,
+        )
+    };
+
+    let is_elevated = info_result.is_ok() && elevation.TokenIsElevated != 0;
+
+    unsafe {
+        let _ = windows::Win32::Foundation::CloseHandle(token_handle);
+    }
+
+    is_elevated
 }
 
 fn check_self_integrity() -> bool {

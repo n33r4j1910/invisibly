@@ -21,7 +21,7 @@ pub struct TrustLevel {
     pub score: u8,                      // 0-100
     pub history: Vec<TrustEvent>,
     pub last_updated: String,
-    pub recovery_state: RecoveryState,  // FIX: Track recovery tier
+    pub recovery_state: RecoveryState,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,7 +30,7 @@ pub struct TrustEvent {
     pub reason: String,
     pub deduction: u8,
     pub new_score: u8,
-    pub event_type: TrustEventType,     // FIX: Categorize events
+    pub event_type: TrustEventType,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -45,10 +45,10 @@ pub enum TrustEventType {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum RecoveryState {
-    Fast,      // 0-20: 5 points per cycle
-    Medium,    // 21-60: 2 points per cycle
-    Slow,      // 61-90: 1 point per cycle
-    Locked,    // 91-100: manual only
+    Fast,
+    Medium,
+    Slow,
+    Locked,
 }
 
 impl TrustLevel {
@@ -84,15 +84,16 @@ impl TrustLevel {
         self.save();
     }
 
-    // FIX: Correct tiered recovery - fast near 100, slow near 0
+    // FIX: Trust can recover from ANY score (including 0)
+    // Fast recovery near bottom (0-20), slow near top (91-100)
     pub fn recover(&mut self, amount: u8) {
-    let recovery_amount = match self.score {
-        91..=100 => 2,   // Fast recovery near top
-        61..=90  => 1,   // Slow recovery mid
-        21..=60  => 1,   // Slow recovery (no dead zone)
-        0..=20   => 0,   // Locked at bottom (manual only)
-        _ => 0,
-    };
+        let recovery_amount = match self.score {
+            91..=100 => 1,   // Slowest near top
+            61..=90  => 2,   // Medium recovery mid
+            21..=60  => 3,   // Fast recovery lower mid
+            0..=20   => 5,   // Fastest recovery at bottom (to get out of 0)
+            _ => 0,
+        };
 
         if recovery_amount == 0 {
             return;
@@ -116,7 +117,6 @@ impl TrustLevel {
     }
 
     pub fn manual_verify(&mut self, reason: &str, authorized_by: &str) {
-        // FIX: Better audit trail with authorization
         let event = TrustEvent {
             timestamp: chrono::Local::now().to_rfc3339(),
             reason: format!("Manual verification: {} (authorized by: {})", reason, authorized_by),
@@ -131,7 +131,6 @@ impl TrustLevel {
         self.save();
     }
 
-    // FIX: Calculate recovery tier based on current score
     fn get_recovery_tier(&self) -> RecoveryState {
         match self.score {
             0..=20 => RecoveryState::Fast,
@@ -167,7 +166,6 @@ pub fn deduct_trust(reason: &str, deduction: u8) {
     trust.apply_deduction(reason, deduction, TrustEventType::Deduction);
 }
 
-// FIX: Specific deduction types for better tracking
 pub fn deduct_trust_baseline(reason: &str, deduction: u8) {
     let mut trust = TrustLevel::load_or_default();
     trust.apply_deduction(reason, deduction, TrustEventType::BaselineTamper);
@@ -188,10 +186,8 @@ pub fn recover_trust(amount: u8) {
     trust.recover(amount);
 }
 
-// FIX: Manual verify with authorization
 pub fn manual_verify() {
     let mut trust = TrustLevel::load_or_default();
-    // Use a generic reason but include that it came from API
     trust.manual_verify("API request", "dashboard-user");
 }
 

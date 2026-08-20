@@ -3,8 +3,11 @@
 
 use serde::{Serialize, Deserialize};
 use std::process::Command;
+use std::os::windows::process::CommandExt;
 use std::collections::HashMap;
 use std::fs;
+
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 // ============================================
 // SYSTEM STATE STRUCT
@@ -123,7 +126,7 @@ pub fn collect_state() -> SystemState {
 
 pub fn get_dns() -> Vec<String> {
     let mut d = Vec::new();
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile","-Command","Get-DnsClientServerAddress -AddressFamily IPv4 | Where-Object {$_.ServerAddresses.Count -gt 0} | ForEach-Object {$_.ServerAddresses -join ','}"])
         .output() {
         for l in String::from_utf8_lossy(&o.stdout).lines() {
@@ -148,7 +151,7 @@ pub fn get_hosts_hash() -> String {
 
 pub fn get_arp() -> Vec<String> {
     let mut a = Vec::new();
-    if let Ok(o) = Command::new("arp").args(["-a"]).output() {
+    if let Ok(o) = Command::new("arp").creation_flags(CREATE_NO_WINDOW).args(["-a"]).output() {
         for l in String::from_utf8_lossy(&o.stdout).lines() {
             // FIX #15: Broader pattern matching for non-English Windows
             if l.contains("dynamic") || l.contains("static") || l.contains("dynamique") || l.contains("statique") || l.contains("dinámico") || l.contains("estático") {
@@ -165,7 +168,7 @@ pub fn get_arp() -> Vec<String> {
 }
 
 pub fn get_wifi() -> String {
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile","-Command","(Get-NetConnectionProfile | Where-Object {$_.InterfaceAlias -like '*Wi*' -or $_.InterfaceAlias -like '*Wireless*'} | Select-Object -First 1).Name"])
         .output() {
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
@@ -176,7 +179,7 @@ pub fn get_wifi() -> String {
 
 pub fn get_proxy() -> Vec<String> {
     let mut p = Vec::new();
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile","-Command","Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' | Select-Object ProxyServer, ProxyEnable | ForEach-Object { $_.ProxyEnable.ToString() + ':' + $_.ProxyServer }"])
         .output() {
         for l in String::from_utf8_lossy(&o.stdout).lines() {
@@ -189,7 +192,7 @@ pub fn get_proxy() -> Vec<String> {
 
 pub fn get_network_devices() -> Vec<String> {
     let mut d = Vec::new();
-    if let Ok(o) = Command::new("arp").args(["-a"]).output() {
+    if let Ok(o) = Command::new("arp").creation_flags(CREATE_NO_WINDOW).args(["-a"]).output() {
         for l in String::from_utf8_lossy(&o.stdout).lines() {
             // FIX #15: Broader pattern matching
             if l.contains("dynamic") || l.contains("dynamique") || l.contains("dinámico") {
@@ -207,7 +210,7 @@ pub fn get_network_devices() -> Vec<String> {
 
 pub fn get_network_adapters() -> Vec<String> {
     let mut n = Vec::new();
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile","-Command","Get-NetAdapter | Select-Object -ExpandProperty Name"])
         .output() {
         for l in String::from_utf8_lossy(&o.stdout).lines() {
@@ -220,7 +223,7 @@ pub fn get_network_adapters() -> Vec<String> {
 
 pub fn get_ports() -> Vec<String> {
     let mut p = Vec::new();
-    if let Ok(o) = Command::new("netstat").args(["-ano","-p","TCP"]).output() {
+    if let Ok(o) = Command::new("netstat").creation_flags(CREATE_NO_WINDOW).args(["-ano","-p","TCP"]).output() {
         for l in String::from_utf8_lossy(&o.stdout).lines().skip(4) {
             // FIX #15: Broader pattern matching for LISTENING
             if l.contains("LISTENING") || l.contains("LISTEN") || l.contains("ECOUTE") || l.contains("ESCUCHA") {
@@ -252,7 +255,7 @@ pub fn get_startup() -> Vec<String> {
             e.push(f.file_name().to_string_lossy().to_string());
         }
     }
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile","-Command","(Get-ItemProperty 'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run').PSObject.Properties | Where-Object {$_.Name -ne 'PSPath'} | Select-Object -ExpandProperty Name"])
         .output() {
         for l in String::from_utf8_lossy(&o.stdout).lines() {
@@ -271,7 +274,7 @@ pub fn get_firewall() -> Vec<String> {
     let mut p = Vec::new();
     
     // FIX: Use the working PowerShell syntax confirmed on target system
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args([
             "-NoProfile",
             "-Command",
@@ -289,7 +292,7 @@ pub fn get_firewall() -> Vec<String> {
     
     // Fallback: Alternative method if the first one fails
     if p.is_empty() {
-        if let Ok(o2) = Command::new("powershell")
+        if let Ok(o2) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
             .args([
                 "-NoProfile",
                 "-Command",
@@ -315,7 +318,7 @@ pub fn get_firewall() -> Vec<String> {
 
 pub fn get_scheduled_tasks() -> Vec<String> {
     let mut t = Vec::new();
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile","-Command","Get-ScheduledTask | Where-Object {$_.State -ne 'Disabled'} | Select-Object -ExpandProperty TaskName | Sort-Object"])
         .output() {
         for l in String::from_utf8_lossy(&o.stdout).lines() {
@@ -328,7 +331,7 @@ pub fn get_scheduled_tasks() -> Vec<String> {
 
 pub fn get_services() -> Vec<String> {
     let mut s = Vec::new();
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile","-Command","Get-Service | Where-Object {$_.Status -eq 'Running' -and $_.StartType -eq 'Automatic'} | Select-Object -ExpandProperty Name | Sort-Object"])
         .output() {
         for l in String::from_utf8_lossy(&o.stdout).lines() {
@@ -340,7 +343,7 @@ pub fn get_services() -> Vec<String> {
 }
 
 pub fn get_defender_status() -> String {
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile","-Command","Get-MpComputerStatus | Select-Object -ExpandProperty RealTimeProtectionEnabled"])
         .output() {
         match String::from_utf8_lossy(&o.stdout).trim() {
@@ -354,7 +357,7 @@ pub fn get_defender_status() -> String {
 }
 
 pub fn get_secure_boot() -> String {
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile","-Command","Confirm-SecureBootUEFI | Select-Object -ExpandProperty Supported"])
         .output() {
         match String::from_utf8_lossy(&o.stdout).trim() {
@@ -367,7 +370,7 @@ pub fn get_secure_boot() -> String {
 }
 
 pub fn get_login_failures() -> String {
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile","-Command","Get-WinEvent -FilterHashtable @{LogName='Security'; ID=4625} -MaxEvents 20 -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count"])
         .output() {
         let c = String::from_utf8_lossy(&o.stdout).trim().to_string();
@@ -381,7 +384,7 @@ pub fn get_login_failures() -> String {
 
 pub fn get_suspicious_processes() -> Vec<String> {
     let mut sp = Vec::new();
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile","-Command","Get-Process | Where-Object {$_.Path -match 'Temp|Downloads|Desktop'} | Select-Object -ExpandProperty ProcessName -Unique"])
         .output() {
         for l in String::from_utf8_lossy(&o.stdout).lines() {
@@ -394,7 +397,7 @@ pub fn get_suspicious_processes() -> Vec<String> {
 
 pub fn get_root_cas() -> Vec<String> {
     let mut c = Vec::new();
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile","-Command","Get-ChildItem Cert:\\LocalMachine\\Root, Cert:\\CurrentUser\\Root | Select-Object -ExpandProperty Subject | Sort-Object"])
         .output() {
         for l in String::from_utf8_lossy(&o.stdout).lines() {
@@ -411,7 +414,7 @@ pub fn get_root_cas() -> Vec<String> {
 
 pub fn get_bt_devices() -> Vec<String> {
     let mut b = Vec::new();
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile","-Command","Get-PnpDevice -Class Bluetooth | Where-Object {$_.Status -eq 'OK'} | Select-Object -ExpandProperty FriendlyName"])
         .output() {
         for l in String::from_utf8_lossy(&o.stdout).lines() {
@@ -424,7 +427,7 @@ pub fn get_bt_devices() -> Vec<String> {
 
 pub fn get_hid_devices() -> Vec<String> {
     let mut h = Vec::new();
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile","-Command","Get-PnpDevice -Class Keyboard,Mouse | Where-Object {$_.Status -eq 'OK'} | Select-Object -ExpandProperty FriendlyName"])
         .output() {
         for l in String::from_utf8_lossy(&o.stdout).lines() {
@@ -447,7 +450,7 @@ pub fn get_installed_software() -> Vec<String> {
         "farmville", "bubble witch", "mycleanpc", "advanced systemcare",
         "wise care", "glary utilities"
     ];
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile","-Command","Get-ItemProperty HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*, HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\* | Select-Object -ExpandProperty DisplayName -ErrorAction SilentlyContinue"])
         .output() {
         for l in String::from_utf8_lossy(&o.stdout).lines() {
@@ -540,7 +543,7 @@ pub fn get_homoglyph_domains() -> Vec<String> {
 // ============================================
 
 pub fn get_uac_status() -> String {
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile", "-Command", "(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System').EnableLUA"])
         .output() {
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
@@ -551,7 +554,7 @@ pub fn get_uac_status() -> String {
 }
 
 pub fn get_windows_update_status() -> String {
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile", "-Command", "Get-Service wuauserv | Select-Object -ExpandProperty Status"])
         .output() {
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
@@ -564,13 +567,13 @@ pub fn get_windows_update_status() -> String {
 // FIX: Properly detect System Restore status
 pub fn get_system_restore_status() -> String {
     // First check: does the srservice exist?
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile", "-Command", "Get-Service -Name srservice -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name"])
         .output() {
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
         if !s.is_empty() && s == "srservice" {
             // Service exists, check if it's running
-            if let Ok(o2) = Command::new("powershell")
+            if let Ok(o2) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
                 .args(["-NoProfile", "-Command", "Get-Service srservice | Select-Object -ExpandProperty Status"])
                 .output() {
                 let status = String::from_utf8_lossy(&o2.stdout).trim().to_string();
@@ -590,7 +593,7 @@ pub fn get_system_restore_status() -> String {
     }
     
     // Fallback: check if System Restore has restore points
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile", "-Command", "Get-ComputerRestorePoint -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count"])
         .output() {
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
@@ -611,7 +614,7 @@ pub fn get_system_restore_status() -> String {
 
 pub fn get_event_log_status() -> String {
     // First check if the Security log service is running
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile", "-Command", "Get-Service -Name EventLog -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Status"])
         .output() {
         let status = String::from_utf8_lossy(&o.stdout).trim().to_string();
@@ -621,13 +624,13 @@ pub fn get_event_log_status() -> String {
     }
     
     // Check if Security log exists and has events
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile", "-Command", "Get-WinEvent -LogName Security -MaxEvents 1 -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count"])
         .output() {
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
         if s == "0" { 
             // Could be empty or cleared - check if log exists
-            if let Ok(o2) = Command::new("powershell")
+            if let Ok(o2) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
                 .args(["-NoProfile", "-Command", "Get-WinEvent -ListLog Security -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LogName"])
                 .output() {
                 let log_name = String::from_utf8_lossy(&o2.stdout).trim().to_string();
@@ -643,14 +646,14 @@ pub fn get_event_log_status() -> String {
 }
 
 pub fn get_smart_screen_status() -> String {
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile", "-Command", "(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer').SmartScreenEnabled"])
         .output() {
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
         if s == "RequireAdmin" || s == "Enabled" { return "ON".to_string(); }
         if s == "Off" { return "OFF".to_string(); }
     }
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile", "-Command", "Get-MpPreference | Select-Object -ExpandProperty EnableSmartScreen"])
         .output() {
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
@@ -661,7 +664,7 @@ pub fn get_smart_screen_status() -> String {
 }
 
 pub fn get_vpn_status() -> String {
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile", "-Command", "Get-NetAdapter | Where-Object {$_.Name -like '*VPN*' -or $_.Name -like '*WireGuard*' -or $_.Name -like '*OpenVPN*'} | Where-Object {$_.Status -eq 'Up'} | Measure-Object | Select-Object -ExpandProperty Count"])
         .output() {
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
@@ -669,7 +672,7 @@ pub fn get_vpn_status() -> String {
             if count > 0 { return "CONNECTED".to_string(); }
         }
     }
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile", "-Command", "Get-Process | Where-Object {$_.ProcessName -match 'vpn|wireguard|openvpn|pia|expressvpn|nordvpn'} | Measure-Object | Select-Object -ExpandProperty Count"])
         .output() {
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
@@ -681,7 +684,7 @@ pub fn get_vpn_status() -> String {
 }
 
 pub fn get_ipv6_status() -> String {
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile", "-Command", "Get-NetAdapterBinding -ComponentID ms_tcpip6 | Where-Object {$_.Enabled -eq $true} | Measure-Object | Select-Object -ExpandProperty Count"])
         .output() {
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
@@ -693,7 +696,7 @@ pub fn get_ipv6_status() -> String {
 }
 
 pub fn get_wifi_profile_status() -> String {
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile", "-Command", "Get-NetConnectionProfile | Select-Object -ExpandProperty NetworkCategory"])
         .output() {
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
@@ -707,7 +710,7 @@ pub fn get_wifi_profile_status() -> String {
 }
 
 pub fn get_doh_status() -> String {
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile", "-Command", "Get-DnsClient | Select-Object -ExpandProperty UseDoH"])
         .output() {
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
@@ -718,7 +721,7 @@ pub fn get_doh_status() -> String {
 }
 
 pub fn get_laps_status() -> String {
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile", "-Command", "Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\LAPS' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty 'Enabled'"])
         .output() {
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
@@ -734,7 +737,7 @@ pub fn get_laps_status() -> String {
 
 /// Detects DHCP spoofing by checking the DHCP server IP
 pub fn get_dhcp_server() -> String {
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile", "-Command", "Get-NetIPConfiguration | Where-Object {$_.InterfaceAlias -like '*Wi*' -or $_.InterfaceAlias -like '*Wireless*'} | Select-Object -ExpandProperty DhcpServer"])
         .output() {
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
@@ -743,7 +746,7 @@ pub fn get_dhcp_server() -> String {
         }
     }
     // Fallback: check DHCP server via ipconfig
-    if let Ok(o) = Command::new("ipconfig")
+    if let Ok(o) = Command::new("ipconfig").creation_flags(CREATE_NO_WINDOW)
         .args(["/all"])
         .output() {
         for l in String::from_utf8_lossy(&o.stdout).lines() {
@@ -762,7 +765,7 @@ pub fn get_dhcp_server() -> String {
 
 /// Checks if BitLocker is enabled on the system drive
 pub fn get_bitlocker_status() -> String {
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile", "-Command", "Get-BitLockerVolume -MountPoint 'C:' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ProtectionStatus"])
         .output() {
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
@@ -770,7 +773,7 @@ pub fn get_bitlocker_status() -> String {
         if s == "Off" { return "OFF".to_string(); }
     }
     // Fallback: check registry
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile", "-Command", "(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\BitLocker\\Status\\C:' -ErrorAction SilentlyContinue).EncryptionStatus"])
         .output() {
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
@@ -782,7 +785,7 @@ pub fn get_bitlocker_status() -> String {
 
 /// Checks if Credential Guard is enabled
 pub fn get_credential_guard_status() -> String {
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile", "-Command", "(Get-ComputerInfo).DeviceGuardCredentialGuardStatus"])
         .output() {
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
@@ -790,7 +793,7 @@ pub fn get_credential_guard_status() -> String {
         if s == "Off" { return "OFF".to_string(); }
     }
     // Fallback: check registry
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile", "-Command", "(Get-ItemProperty 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\DeviceGuard' -ErrorAction SilentlyContinue).EnableVirtualizationBasedSecurity"])
         .output() {
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
@@ -802,7 +805,7 @@ pub fn get_credential_guard_status() -> String {
 
 /// Checks if RDP (port 3389) is listening
 pub fn get_rdp_status() -> String {
-    if let Ok(o) = Command::new("netstat")
+    if let Ok(o) = Command::new("netstat").creation_flags(CREATE_NO_WINDOW)
         .args(["-ano", "-p", "TCP"])
         .output() {
         for l in String::from_utf8_lossy(&o.stdout).lines() {
@@ -812,7 +815,7 @@ pub fn get_rdp_status() -> String {
         }
     }
     // Also check if RDP service is running
-    if let Ok(o) = Command::new("powershell")
+    if let Ok(o) = Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile", "-Command", "Get-Service -Name TermService -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Status"])
         .output() {
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string();

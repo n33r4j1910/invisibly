@@ -13,6 +13,7 @@ use std::sync::Mutex;
 use chrono::Local;
 
 const TIMELINE_FILE: &str = "C:\\ProgramData\\Invisibly\\timeline.jsonl";
+const MAX_ENTRIES: usize = 5000;
 
 // ============================================
 // IN-MEMORY CACHE — FIX #25
@@ -44,7 +45,7 @@ fn get_cached_entries() -> Vec<TimelineEntry> {
 pub struct TimelineEntry {
     pub id: u64,
     pub timestamp: String,
-    pub monotonic_counter: u64,  // FIX: Add monotonic counter for clock drift protection
+    pub monotonic_counter: u64,
     pub category: String,
     pub action: String,
     pub before: String,
@@ -83,7 +84,7 @@ pub fn add_entry(
 ) -> Result<(), String> {
     let previous = get_last_hash();
     let id = get_next_id();
-    let counter = get_next_counter();  // FIX: Use monotonic counter
+    let counter = get_next_counter();
 
     let entry = TimelineEntry {
         id,
@@ -125,7 +126,61 @@ pub fn export_timeline(format: &str) -> String {
     }
 }
 
-// FIX #12: verify_chain() now called and exposed
+// NEW: Prune old entries to prevent unbounded growth
+pub fn prune_old_entries() {
+    let entries = read_entries_from_disk();
+    if entries.len() <= MAX_ENTRIES {
+        return;
+    }
+
+    println!("🔄 Pruning timeline: keeping last {} entries", MAX_ENTRIES);
+    
+    let keep_start = entries.len() - MAX_ENTRIES;
+    let mut pruned: Vec<TimelineEntry> = entries.into_iter().skip(keep_start).collect();
+
+    // Re-anchor the first entry's previous_hash to "0" to maintain chain integrity
+    if let Some(first) = pruned.first_mut() {
+        first.previous_hash = "0".to_string();
+        // Recompute hash for the first entry after changing previous_hash
+        first.hash = compute_hash(
+            &first.previous_hash,
+            first.id,
+            &first.category,
+            &first.action,
+            &first.before,
+            &first.after,
+            &first.result,
+            first.monotonic_counter,
+        );
+        // Recompute hashes for all subsequent entries
+        for i in 1..pruned.len() {
+            let prev_hash = pruned[i-1].hash.clone();
+            pruned[i].previous_hash = prev_hash.clone();
+            pruned[i].hash = compute_hash(
+                &pruned[i].previous_hash,
+                pruned[i].id,
+                &pruned[i].category,
+                &pruned[i].action,
+                &pruned[i].before,
+                &pruned[i].after,
+                &pruned[i].result,
+                pruned[i].monotonic_counter,
+            );
+        }
+    }
+
+    // Write pruned timeline back to disk
+    let path = Path::new(TIMELINE_FILE);
+    let content: Vec<String> = pruned.iter()
+        .map(|e| serde_json::to_string(e).unwrap_or_default())
+        .filter(|s| !s.is_empty())
+        .collect();
+    
+    let data = content.join("\n");
+    let _ = fs::write(path, data + "\n");
+    invalidate_cache();
+}
+
 pub fn verify_chain() -> bool {
     let entries = read_entries_from_disk();
     if entries.is_empty() {
@@ -135,7 +190,6 @@ pub fn verify_chain() -> bool {
     let mut prev_hash = String::from("0");
     let mut prev_counter: u64 = 0;
     for entry in &entries {
-        // Check monotonic counter is increasing
         if entry.monotonic_counter <= prev_counter {
             return false;
         }
@@ -159,14 +213,12 @@ pub fn verify_chain() -> bool {
     true
 }
 
-// FIX #12: Verify chain on startup with alert
 pub fn verify_chain_on_startup() -> bool {
     let result = verify_chain();
     if result {
         println!("✅ Timeline chain verified");
     } else {
         println!("❌ Timeline chain verification FAILED! Possible tampering detected.");
-        // FIX: Log the failure
         let log_path = format!("{}\\timeline_failure.log", 
             std::env::var("PROGRAMDATA").unwrap_or_else(|_| "C:\\ProgramData".to_string()));
         let _ = fs::create_dir_all(Path::new(&log_path).parent().unwrap());
@@ -186,7 +238,6 @@ pub fn verify_chain_on_startup() -> bool {
     result
 }
 
-// FIX #12: Initialize timeline on daemon startup
 pub fn init_timeline() -> bool {
     verify_chain_on_startup()
 }
@@ -195,7 +246,6 @@ pub fn init_timeline() -> bool {
 // HELPERS
 // ============================================
 
-// FIX: Get next counter value
 static NEXT_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 fn get_next_counter() -> u64 {
@@ -222,7 +272,6 @@ fn compute_hash(
     result: &RepairResult,
     counter: u64,
 ) -> String {
-    // FIX: Include counter in hash for clock drift protection
     let data = format!(
         "{}{}{}{}{}{}{:?}{}",
         previous, id, category, action, before, after, result, counter

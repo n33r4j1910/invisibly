@@ -40,8 +40,18 @@ enum UserEvent {
 }
 
 const API_URL: &str = "http://127.0.0.1:12790";
-const DAEMON_EXE: &str = "C:\\Invisibly\\target\\release\\invisibly-daemon.exe";
 const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+// ============================================
+// DYNAMIC DAEMON PATH
+// ============================================
+
+fn daemon_exe_path() -> std::path::PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("invisibly-daemon.exe")))
+        .unwrap_or_else(|| "invisibly-daemon.exe".into())
+}
 
 // ============================================
 // TOKEN STORAGE
@@ -160,13 +170,25 @@ fn call_approve(category: &str) -> bool {
 // FIX: Tray supervises the daemon
 // ============================================
 
+fn is_daemon_running() -> bool {
+    let output = process::Command::new("tasklist")
+        .args(["/FI", "IMAGENAME eq invisibly-daemon.exe"])
+        .output();
+    if let Ok(output) = output {
+        String::from_utf8_lossy(&output.stdout).contains("invisibly-daemon.exe")
+    } else {
+        false
+    }
+}
+
 fn relaunch_daemon() {
     println!("🔁 Daemon unresponsive - attempting relaunch...");
-    match process::Command::new(DAEMON_EXE)
+    let daemon_path = daemon_exe_path();
+    match process::Command::new(&daemon_path)
         .creation_flags(CREATE_NO_WINDOW)
         .spawn()
     {
-        Ok(_) => println!("✅ Daemon relaunch triggered"),
+        Ok(_) => println!("✅ Daemon relaunch triggered from: {}", daemon_path.display()),
         Err(e) => println!("❌ Failed to relaunch daemon: {}", e),
     }
 }
@@ -210,6 +232,11 @@ impl ApplicationHandler<UserEvent> for TrayApp {
         }
 
         println!("🔄 TrayApp::resumed() - Creating tray icon");
+
+        // Ensure daemon is running immediately on startup (skip if already running)
+        if !is_daemon_running() {
+            relaunch_daemon();
+        }
 
         let pending = get_pending_categories();
         let pending_count = pending.len();
@@ -303,45 +330,51 @@ impl ApplicationHandler<UserEvent> for TrayApp {
                 if let Some(tray) = &self.tray {
                     let (icon, tooltip) = match status {
                         Some(s) => {
-                            println!("📊 Status: score={:?}, state={:?}, enabled={}", 
-                                     s.integrity_score, s.integrity_state, s.enabled);
+                            println!("📊 Status: score={:?}, state={:?}, ghost={}, enabled={}", 
+                                     s.integrity_score, s.integrity_state, s.ghost, s.enabled);
                             
-                            // FIX: Use INTEGRITY SCORE for color (not state string)
-                            match s.integrity_score {
-                                Some(score) if score >= 90 => {
-                                    if s.enabled {
-                                        (self.icons.0.clone(), format!("🟢 Maintained - {}%\nRight-click for menu", score))
-                                    } else {
-                                        (self.icons.4.clone(), "⚪ Disabled - Monitor Only".to_string())
+                            // FIX: Check GHOST MODE FIRST
+                            if s.ghost {
+                                (self.icons.3.clone(), format!("🔵 Ghost Mode Active - {}%\nRight-click for menu", 
+                                    s.integrity_score.unwrap_or(0)))
+                            } else {
+                                // Then check integrity score for color
+                                match s.integrity_score {
+                                    Some(score) if score >= 90 => {
+                                        if s.enabled {
+                                            (self.icons.0.clone(), format!("🟢 Maintained - {}%\nRight-click for menu", score))
+                                        } else {
+                                            (self.icons.4.clone(), "⚪ Disabled - Monitor Only".to_string())
+                                        }
                                     }
-                                }
-                                Some(score) if score >= 70 => {
-                                    (self.icons.1.clone(), format!("🟡 Drift Detected - {}%\nRight-click for menu", score))
-                                }
-                                Some(score) if score >= 40 => {
-                                    (self.icons.2.clone(), format!("🔴 Compromised - {}%\nRight-click for menu", score))
-                                }
-                                Some(score) => {
-                                    (self.icons.2.clone(), format!("🔴 CRITICAL - {}%\nRight-click for menu", score))
-                                }
-                                None => {
-                                    // Fallback to state string if score missing
-                                    match s.integrity_state.as_deref() {
-                                        Some("Maintained") => (self.icons.0.clone(), "🟢 Maintained\nRight-click for menu".to_string()),
-                                        Some("DriftDetected") => (self.icons.1.clone(), "🟡 Drift Detected\nRight-click for menu".to_string()),
-                                        Some("Compromised") => (self.icons.2.clone(), "🔴 Compromised\nRight-click for menu".to_string()),
-                                        Some("Lockdown") => (self.icons.3.clone(), "🔵 Lockdown Active\nRight-click for menu".to_string()),
-                                        _ => {
-                                            match s.trust_state.as_str() {
-                                                "Ghost" => (self.icons.3.clone(), "🔵 Ghost Mode Active\nRight-click for menu".to_string()),
-                                                "Trusted" => {
-                                                    if s.enabled {
-                                                        (self.icons.0.clone(), "🟢 Trusted - Active\nRight-click for menu".to_string())
-                                                    } else {
-                                                        (self.icons.4.clone(), "⚪ Disabled - Monitor Only".to_string())
+                                    Some(score) if score >= 70 => {
+                                        (self.icons.1.clone(), format!("🟡 Drift Detected - {}%\nRight-click for menu", score))
+                                    }
+                                    Some(score) if score >= 40 => {
+                                        (self.icons.2.clone(), format!("🔴 Compromised - {}%\nRight-click for menu", score))
+                                    }
+                                    Some(score) => {
+                                        (self.icons.2.clone(), format!("🔴 CRITICAL - {}%\nRight-click for menu", score))
+                                    }
+                                    None => {
+                                        // Fallback to state string if score missing
+                                        match s.integrity_state.as_deref() {
+                                            Some("Maintained") => (self.icons.0.clone(), "🟢 Maintained\nRight-click for menu".to_string()),
+                                            Some("DriftDetected") => (self.icons.1.clone(), "🟡 Drift Detected\nRight-click for menu".to_string()),
+                                            Some("Compromised") => (self.icons.2.clone(), "🔴 Compromised\nRight-click for menu".to_string()),
+                                            Some("Lockdown") => (self.icons.3.clone(), "🔵 Lockdown Active\nRight-click for menu".to_string()),
+                                            _ => {
+                                                match s.trust_state.as_str() {
+                                                    "Ghost" => (self.icons.3.clone(), "🔵 Ghost Mode Active\nRight-click for menu".to_string()),
+                                                    "Trusted" => {
+                                                        if s.enabled {
+                                                            (self.icons.0.clone(), "🟢 Trusted - Active\nRight-click for menu".to_string())
+                                                        } else {
+                                                            (self.icons.4.clone(), "⚪ Disabled - Monitor Only".to_string())
+                                                        }
                                                     }
+                                                    _ => (self.icons.4.clone(), "⚪ Checking...".to_string()),
                                                 }
-                                                _ => (self.icons.4.clone(), "⚪ Checking...".to_string()),
                                             }
                                         }
                                     }

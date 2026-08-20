@@ -13,9 +13,12 @@
 //! the daemon stops silently re-fighting the OS's live network config.
 
 use std::process::Command;
+use std::os::windows::process::CommandExt;
 use std::fs;
 use std::path::Path;
 use chrono::Local;
+
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 const DATA_DIR: &str = "C:\\ProgramData\\Invisibly";
 
@@ -124,6 +127,7 @@ pub fn create_hosts_backup() -> bool {
 pub fn force_reset_dns() -> bool {
     // FIX: Don't hardcode "Wi-Fi" - target whatever adapter is actually up
     let mut cmd = Command::new("powershell");
+    cmd.creation_flags(CREATE_NO_WINDOW);
     cmd.args(["-NoProfile", "-Command",
         "Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | ForEach-Object { Set-DnsClientServerAddress -InterfaceIndex $_.ifIndex -ResetServerAddresses }"]);
     run_command(&mut cmd, "DNS", "Reset to DHCP (active adapter)")
@@ -156,12 +160,14 @@ pub fn restore_hosts() -> bool {
 
 pub fn force_enable_firewall() -> bool {
     let mut cmd = Command::new("powershell");
+    cmd.creation_flags(CREATE_NO_WINDOW);
     cmd.args(["-NoProfile", "-Command", "Set-NetFirewallProfile -All -Enabled True"]);
     run_command(&mut cmd, "Firewall", "Re-enabled all profiles")
 }
 
 pub fn remove_proxy() -> bool {
     let mut cmd = Command::new("powershell");
+    cmd.creation_flags(CREATE_NO_WINDOW);
     cmd.args(["-NoProfile", "-Command",
         "Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -Name ProxyServer -ErrorAction SilentlyContinue; Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -Name ProxyEnable -ErrorAction SilentlyContinue; Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -Name ProxyEnable -Value 0"]);
     run_command(&mut cmd, "Proxy", "Removed proxy settings")
@@ -169,12 +175,14 @@ pub fn remove_proxy() -> bool {
 
 pub fn enable_defender() -> bool {
     let mut cmd = Command::new("powershell");
+    cmd.creation_flags(CREATE_NO_WINDOW);
     cmd.args(["-NoProfile", "-Command", "Set-MpPreference -DisableRealtimeMonitoring $false"]);
     run_command(&mut cmd, "Defender", "Re-enabled realtime protection")
 }
 
 pub fn enable_uac() -> bool {
     let mut cmd = Command::new("powershell");
+    cmd.creation_flags(CREATE_NO_WINDOW);
     cmd.args(["-NoProfile", "-Command",
         "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' -Name EnableLUA -Value 1"]);
     run_command(&mut cmd, "UAC", "Re-enabled")
@@ -182,6 +190,7 @@ pub fn enable_uac() -> bool {
 
 pub fn enable_windows_update() -> bool {
     let mut cmd = Command::new("powershell");
+    cmd.creation_flags(CREATE_NO_WINDOW);
     cmd.args(["-NoProfile", "-Command",
         "Set-Service -Name wuauserv -StartupType Automatic -Status Running"]);
     run_command(&mut cmd, "WindowsUpdate", "Re-enabled")
@@ -189,11 +198,13 @@ pub fn enable_windows_update() -> bool {
 
 pub fn enable_system_restore() -> bool {
     let mut cmd = Command::new("powershell");
+    cmd.creation_flags(CREATE_NO_WINDOW);
     cmd.args(["-NoProfile", "-Command",
         "Enable-ComputerRestore -Drive 'C:\\'"]);
     let result1 = run_command(&mut cmd, "SystemRestore", "Re-enabled");
     
     let mut cmd2 = Command::new("powershell");
+    cmd2.creation_flags(CREATE_NO_WINDOW);
     cmd2.args(["-NoProfile", "-Command",
         "Set-Service -Name srservice -StartupType Automatic -Status Running"]);
     let result2 = run_command(&mut cmd2, "SystemRestore", "Service started");
@@ -203,11 +214,13 @@ pub fn enable_system_restore() -> bool {
 
 pub fn enable_smart_screen() -> bool {
     let mut cmd = Command::new("powershell");
+    cmd.creation_flags(CREATE_NO_WINDOW);
     cmd.args(["-NoProfile", "-Command",
         "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer' -Name SmartScreenEnabled -Value 'RequireAdmin'"]);
     let result1 = run_command(&mut cmd, "SmartScreen", "Re-enabled");
     
     let mut cmd2 = Command::new("powershell");
+    cmd2.creation_flags(CREATE_NO_WINDOW);
     cmd2.args(["-NoProfile", "-Command",
         "Set-MpPreference -EnableSmartScreen $true"]);
     let result2 = run_command(&mut cmd2, "SmartScreen", "MP preference updated");
@@ -217,6 +230,7 @@ pub fn enable_smart_screen() -> bool {
 
 pub fn enable_ipv6() -> bool {
     let mut cmd = Command::new("powershell");
+    cmd.creation_flags(CREATE_NO_WINDOW);
     cmd.args(["-NoProfile", "-Command",
         "Enable-NetAdapterBinding -Name '*' -ComponentID ms_tcpip6"]);
     run_command(&mut cmd, "IPv6", "Re-enabled")
@@ -224,6 +238,7 @@ pub fn enable_ipv6() -> bool {
 
 pub fn set_wifi_private() -> bool {
     let mut cmd = Command::new("powershell");
+    cmd.creation_flags(CREATE_NO_WINDOW);
     cmd.args(["-NoProfile", "-Command",
         "Set-NetConnectionProfile -NetworkCategory Private"]);
     run_command(&mut cmd, "WiFiProfile", "Set to Private")
@@ -232,6 +247,7 @@ pub fn set_wifi_private() -> bool {
 pub fn block_bruteforce_ips() -> bool {
     // FIX #14: Check actual output, not just exit code
     let mut cmd = Command::new("powershell");
+    cmd.creation_flags(CREATE_NO_WINDOW);
     cmd.args(["-NoProfile", "-Command",
         "Get-WinEvent -FilterHashtable @{LogName='Security'; ID=4625} -MaxEvents 50 -ErrorAction SilentlyContinue | ForEach-Object { $_.Properties[19].Value } | Where-Object {$_ -match '\\d+\\.\\d+\\.\\d+\\.\\d+'} | Group-Object | Where-Object {$_.Count -gt 5} | Select-Object -ExpandProperty Name | ForEach-Object { New-NetFirewallRule -DisplayName 'TS-Block-Brute-' + $_ -Direction Inbound -RemoteAddress $_ -Action Block }"]);
     
@@ -388,6 +404,7 @@ pub fn flag_bruteforce_detected() -> bool {
 /// Force versions (for API confirmation)
 pub fn force_disable_bt_devices() -> bool {
     let mut cmd = Command::new("powershell");
+    cmd.creation_flags(CREATE_NO_WINDOW);
     cmd.args(["-NoProfile", "-Command",
         "Get-PnpDevice -Class Bluetooth | Where-Object {$_.Status -eq 'OK' -and $_.FriendlyName -notmatch 'Intel|Qualcomm|Realtek|Broadcom|MediaTek|Microsoft'} | Disable-PnpDevice -Confirm:$false -ErrorAction SilentlyContinue"]);
     run_command(&mut cmd, "Bluetooth", "Disabled unknown BT devices")
@@ -395,6 +412,7 @@ pub fn force_disable_bt_devices() -> bool {
 
 pub fn force_disable_hid_devices() -> bool {
     let mut cmd = Command::new("powershell");
+    cmd.creation_flags(CREATE_NO_WINDOW);
     cmd.args(["-NoProfile", "-Command",
         "Get-PnpDevice -Class Keyboard,Mouse | Where-Object {$_.Status -eq 'OK' -and $_.FriendlyName -notmatch 'Microsoft|Logitech|Razer|Dell|HP|Lenovo|Synaptics|Intel'} | Disable-PnpDevice -Confirm:$false -ErrorAction SilentlyContinue"]);
     run_command(&mut cmd, "HID", "Disabled unknown HID devices")
@@ -402,6 +420,7 @@ pub fn force_disable_hid_devices() -> bool {
 
 pub fn force_disable_unknown_adapters() -> bool {
     let mut cmd = Command::new("powershell");
+    cmd.creation_flags(CREATE_NO_WINDOW);
     cmd.args(["-NoProfile", "-Command",
         "Get-NetAdapter | Where-Object {$_.Name -notmatch 'Wi-Fi|Ethernet|Bluetooth|vEthernet|Loopback'} | Disable-NetAdapter -Confirm:$false -ErrorAction SilentlyContinue"]);
     run_command(&mut cmd, "Adapter", "Disabled unknown adapters")
@@ -439,12 +458,14 @@ pub fn clean_unicode_bidi() -> bool {
 pub fn disable_rdp() -> bool {
     // Stop and disable Remote Desktop Service
     let mut cmd = Command::new("powershell");
+    cmd.creation_flags(CREATE_NO_WINDOW);
     cmd.args(["-NoProfile", "-Command",
         "Set-Service -Name TermService -StartupType Disabled -Status Stopped"]);
     let result1 = run_command(&mut cmd, "RDP", "Disabled Remote Desktop Service");
 
     // Block port 3389 in Windows Firewall
     let mut cmd2 = Command::new("netsh");
+    cmd2.creation_flags(CREATE_NO_WINDOW);
     cmd2.args(["advfirewall", "firewall", "add", "rule",
                "name=TS-Block-RDP", "dir=in", "action=block",
                "protocol=TCP", "localport=3389"]);
@@ -624,6 +645,7 @@ pub fn execute_confirmed_repair(category: &str) -> String {
 /// services) - it never touches outbound traffic, so it can't break DNS/browsing.
 pub fn ghost_mode_on() -> bool {
     let mut cmd1 = Command::new("powershell");
+    cmd1.creation_flags(CREATE_NO_WINDOW);
     cmd1.args(["-NoProfile", "-Command",
         "Get-NetFirewallRule -DisplayName 'TS-VPN-Only' -ErrorAction SilentlyContinue | Remove-NetFirewallRule;",
         "Get-NetFirewallRule -DisplayName 'TS-Block-ICMP' -ErrorAction SilentlyContinue | Remove-NetFirewallRule;",
@@ -631,6 +653,7 @@ pub fn ghost_mode_on() -> bool {
     let result1 = run_command(&mut cmd1, "GhostMode", "Cleaned existing rules");
 
     let mut cmd2 = Command::new("powershell");
+    cmd2.creation_flags(CREATE_NO_WINDOW);
     cmd2.args(["-NoProfile", "-Command",
         "New-NetFirewallRule -DisplayName 'TS-Block-ICMP' -Direction Inbound -Protocol ICMPv4 -Action Block;",
         "New-NetFirewallRule -DisplayName 'TS-Block-Mal-Ports' -Direction Inbound -LocalPort 4444,5555,6667,8080,8888,31337,3389,5900,5800,5938,21,23,25,110,143,993,995,3306,5432,1433,1521,27017,6379,11211,5000,4500,5060 -Action Block;",
@@ -649,6 +672,7 @@ pub fn ghost_mode_on() -> bool {
 
 pub fn ghost_mode_off() -> bool {
     let mut cmd1 = Command::new("powershell");
+    cmd1.creation_flags(CREATE_NO_WINDOW);
     cmd1.args(["-NoProfile", "-Command",
         "Get-NetFirewallRule -DisplayName 'TS-VPN-Only' -ErrorAction SilentlyContinue | Remove-NetFirewallRule;",
         "Get-NetFirewallRule -DisplayName 'TS-Block-ICMP' -ErrorAction SilentlyContinue | Remove-NetFirewallRule;",
@@ -661,6 +685,7 @@ pub fn ghost_mode_off() -> bool {
     // full-lockdown implementation) even though ghost_mode_on() no longer
     // sets DefaultOutboundAction itself.
     let mut cmd2 = Command::new("powershell");
+    cmd2.creation_flags(CREATE_NO_WINDOW);
     cmd2.args(["-NoProfile", "-Command",
         "Set-NetFirewallProfile -All -DefaultInboundAction Block;",
         "Set-NetFirewallProfile -All -DefaultOutboundAction Allow;",
@@ -677,6 +702,7 @@ pub fn ghost_mode_off() -> bool {
 /// took effect, rather than trusting the PowerShell process exit code alone.
 fn verify_ghost_rule_present(expect_active: bool) -> bool {
     let mut cmd = Command::new("powershell");
+    cmd.creation_flags(CREATE_NO_WINDOW);
     cmd.args(["-NoProfile", "-Command",
         "(Get-NetFirewallProfile -Name Public).DefaultOutboundAction.ToString();",
         "(Get-NetFirewallRule -DisplayName 'TS-Block-ICMP' -ErrorAction SilentlyContinue | Measure-Object).Count"]);

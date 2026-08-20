@@ -22,8 +22,6 @@
   
   <Capabilities>
     <rescap:Capability Name="runFullTrust" />
-    <rescap:Capability Name="localSystemServices" />
-    <rescap:Capability Name="packagedServices" />
   </Capabilities>
   
   <Resources>
@@ -38,9 +36,6 @@
         <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
       </uap:VisualElements>
       <Extensions>
-        <desktop6:Extension Category="windows.service" EntryPoint="Windows.FullTrustApplication" Executable="invisibly-daemon.exe">
-          <desktop6:Service Name="InvisiblyDaemon" StartAccount="localSystem" StartupType="auto"/>
-        </desktop6:Extension>
         <uap5:Extension Category="windows.startupTask" EntryPoint="Windows.FullTrustApplication" Executable="invisibly-tray.exe">
           <uap5:StartupTask TaskId="InvisiblyTray" Enabled="true" DisplayName="Invisibly Tray"/>
         </uap5:Extension>
