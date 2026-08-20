@@ -406,6 +406,25 @@ fn run_daemon() {
         }
     });
 
+    // NIGHTLY CACHE PRUNE: timeline pruning previously only ran once at daemon
+    // startup, so a long-running session (days between restarts) let the
+    // timeline log grow unbounded until the next restart. Poll the clock and
+    // fire once when it crosses 23:59 local time each day.
+    std::thread::spawn(|| {
+        use chrono::Timelike;
+        let mut last_pruned_date = chrono::Local::now().date_naive();
+        loop {
+            std::thread::sleep(Duration::from_secs(60));
+            let now = chrono::Local::now();
+            let today = now.date_naive();
+            if today != last_pruned_date && now.hour() == 23 && now.minute() >= 59 {
+                println!("🔄 Nightly cache prune (23:59) triggered");
+                timeline::prune_old_entries();
+                last_pruned_date = today;
+            }
+        }
+    });
+
     std::thread::sleep(Duration::from_secs(2));
 
     println!("✅ API server started - Dashboard: http://127.0.0.1:12790");
