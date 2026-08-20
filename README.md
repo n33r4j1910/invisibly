@@ -29,7 +29,7 @@ Instead, it acts as a continuous endpoint integrity monitor. Think of it as the 
 * Core Principles - Privacy *
 
 
-Offline by design, Privacy first, Lightweight, Automatic repair where safe, Human-readable alerts, Zero telemetry, Minimal resource usage, Everything stays on your device.
+Offline by design, Privacy first, Lightweight, Automatic repair where safe, Self-healing infrastructure, Human-readable alerts, Zero telemetry, Minimal resource usage, Everything stays on your device.
 
 
 * Feature Comparison *				
@@ -66,7 +66,7 @@ Proxy Monitoring 	 	 	❌ 	 ❌ 	 ⚠️ 	 ✅
 
 ARP Spoofing Detection 	 	 	❌ 	 ❌ 	 ❌ 	 ✅ 
 
-Port Scan Detection 	 	 	❌ 	 ⚠️ 	 ⚠️ 	 ✅ 
+New Network Device Detection 	 	❌ 	 ❌ 	 ⚠️ 	 ✅ 
 
 Brute-force Detection 	 	 	❌ 	 ❌ 	 ⚠️ 	 ✅ 
 
@@ -98,23 +98,19 @@ Windows Services Monitoring 	 	 ❌ 	 ❌ 	 ⚠️ 	 ✅
 
 *Hardware Protection* 				
 
-USB Storage Monitoring 	 	 	 ❌ 	 ❌ 	 ⚠️ 	 ✅ 
-
 HID Device Monitoring 	 	 	 ❌ 	 ❌ 	 ⚠️ 	 ✅ 
 
 Bluetooth Device Monitoring 	 	 ❌ 	 ❌ 	 ⚠️ 	 ✅ 
 
-*Threat Detection* 				
+Unknown Network Adapter Detection 	 ❌ 	 ❌ 	 ⚠️ 	 ✅ 
 
-Phishing Domain Detection 	 	⚠️ 	 ❌ 	 ⚠️ 	 ✅ 
+*Threat Detection* 				
 
 Homoglyph Domain Detection 	 	❌ 	 ❌ 	 ❌ 	 ✅ 
 
-Zero-width Character Detection     	❌ 	 ❌ 	 ❌ 	 ✅ 
+Unicode Bidi / Zero-width Attack Detection 	❌ 	 ❌ 	 ❌ 	 ✅ 
 
-Unicode Bidi Detection 		 	❌ 	 ❌ 	 ❌ 	 ✅ 
-
-Ransomware Canary Monitoring 	 	⚠️ 	 ❌ 	 ⚠️ 	 ✅ 
+Suspicious Process Detection 	 	⚠️ 	 ❌ 	 ⚠️ 	 ✅ 
 
 *Privacy \& Performance* 				
 
@@ -154,7 +150,7 @@ Test Platform Result
 Invisibly watches the security settings that attackers target.
 
 
-Network (8 signals)
+Network (12 signals)
 
 - DNS configuration
 
@@ -164,13 +160,19 @@ Network (8 signals)
 
 - ARP table
 
-- Listening ports
-
 - Network adapters
 
-- WiFi SSID
+- WiFi SSID and network profile (public/private)
 
 - VPN state
+
+- New network devices
+
+- DHCP configuration
+
+- DNS-over-HTTPS status
+
+- IPv6 status
 
 
 
@@ -195,7 +197,7 @@ Invisibly doesn't just check for known threats — it detects **any** change to 
 This means Invisibly catches **unknown threats** too — not just pre-defined signatures.
 
 
-* Security Controls (8 signals) *
+* Security Controls (11 signals) *
 
 - Windows Firewall
 
@@ -213,6 +215,12 @@ This means Invisibly catches **unknown threats** too — not just pre-defined si
 
 - LAPS
 
+- BitLocker
+
+- Credential Guard
+
+- Windows Event Log
+
 
 * Persistence (3 signals) *
 
@@ -223,35 +231,31 @@ This means Invisibly catches **unknown threats** too — not just pre-defined si
 - Windows Services
 
 
-* Hardware (3 signals) * 
-
-- USB storage
+* Hardware (2 signals) * 
 
 - HID devices (keyboard/mouse)
 
 - Bluetooth devices
 
 
-* Active Attacks (5 signals) *
+* Active Attacks (4 signals) *
 
-- Port scanning
+- Brute force login attempts — automatically blocked at the firewall
 
-- Brute force login attempts
+- Remote Desktop (RDP) unexpectedly enabled — automatically disabled
 
-- Phishing domains in DNS cache
+- Suspicious processes (running from Temp/Downloads/Desktop)
 
-- Ransomware canary files
-
-- Suspicious processes
+- Unexpected new software installed
 
 
 * Social Engineering (3 signals) *
 
 - Homoglyph domains
 
-- Unicode bidi attacks
+- Unicode bidi / zero-width character attacks (hidden characters disguising a redirect)
 
-- Zero-width character injection
+- Fake file extensions (e.g. invoice.pdf.exe)
 
 
 
@@ -281,7 +285,7 @@ Every event is recorded in an append-only timeline.
 
 - 14:03 Integrity Score: 100
 
-- 14:05 USB inserted → Ejected
+- 14:05 RDP enabled → Disabled automatically
 
 
 
@@ -291,30 +295,28 @@ The baseline is:
 
 - Cryptographically signed (HMAC-SHA256)
 
-- Versioned
+- Versioned, with rollback protection
 
 - Tamper-detected
 
-- TPM optional (falls back to HMAC)
+- Signing key protected at rest with Windows DPAPI, tied to your Windows account — not stored as a plain file
+
+- Infrastructure problems (a locked-down data folder, a stale signature from a benign cause) self-heal automatically; a genuinely tampered executable never does — it's always surfaced to you instead
 
 
-If the baseline is tampered → system enters *Invalid* state → manual verification required.
+If the baseline is tampered and the executable itself checks out clean, the daemon regenerates it automatically. If the executable itself fails its own signature check, auto-repair disables and the daemon shows a clear alert (dashboard banner, tray icon, notification) rather than fixing anything silently.
 
 
 * Ghost Mode (Public WiFi) *
 
 
-Auto-enables on public networks:
+Auto-enables on public networks, auto-disables when you're back on a trusted one. Deliberately inbound-only — never touches outbound traffic, so it can't break your internet:
 
-- Blocks all inbound connections
+- Blocks risky inbound ports
 
-- Blocks all outbound except VPN
+- Blocks inbound ICMP
 
-- Disables Network Discovery
-
-- Disables Bluetooth
-
-- Blocks 26 malicious ports
+- Disables Network Discovery and file sharing
 
 
 * System Tray *
@@ -326,11 +328,11 @@ Auto-enables on public networks:
 
 | 🟡 Yellow | Drift detected |
 
-| 🔴 Red | Critical issues |
+| 🔴 Red | Critical issues, or (highest priority) a security alert — the app's own executable failed its tamper check |
 
 | 🔵 Blue | Ghost Mode active |
 
-| ⚪ Gray | Daemon offline |
+| ⚪ Gray | Daemon offline, or running without admin rights (limited protection) |
 
 
 
@@ -354,9 +356,9 @@ Auto-enables on public networks:
 
 * Download and Install — Download Invisibly.msix and double-click to install
 
-* Launch — Open Command Prompt as Administrator and run: (text) invisibly
+* Launch — Open Invisibly from the Start menu. On first run it creates a Windows Scheduled Task so it can run with full privileges at every login, without a permission prompt each time; until that first elevated run, it operates in monitor-only mode (detects and alerts, doesn't auto-repair).
 
-* This starts the daemon, tray, and opens the dashboard automatically.
+* This starts the daemon and tray automatically at every login from then on — no manual launch needed.
 
 * Optional – Set Home WiFi — Click "Set Home WiFi" in the dashboard and enter your network name
 
@@ -391,7 +393,7 @@ Auto-enables on public networks:
 
 Keywords
 
-endpoint integrity, configuration monitoring, behavior-based detection, DNS hijacking, ARP spoofing, hosts file protection, firewall monitoring, defender monitoring, UAC protection, Windows Update monitoring, System Restore protection, SmartScreen monitoring, USB security, Bluetooth security, HID protection, BadUSB prevention, phishing domains, homoglyph detection, zero-width attacks, Unicode bidi attacks, ransomware canary, brute force detection, port scan detection, proxy monitoring, scheduled tasks monitoring, startup persistence, Windows Services monitoring, Ghost Mode, public WiFi protection, stealth mode, integrity score, trust level, security baseline, auto-repair, configuration drift detection, offline security, no telemetry, privacy-first, lightweight, Windows security, Rust, autonomous endpoint protection, token masking, security timeline
+endpoint integrity, configuration monitoring, behavior-based detection, DNS hijacking, ARP spoofing, hosts file protection, firewall monitoring, defender monitoring, UAC protection, Windows Update monitoring, System Restore protection, SmartScreen monitoring, Bluetooth security, HID protection, RDP protection, homoglyph detection, zero-width attacks, Unicode bidi attacks, brute force detection, proxy monitoring, scheduled tasks monitoring, startup persistence, Windows Services monitoring, Ghost Mode, public WiFi protection, stealth mode, integrity score, trust level, security baseline, auto-repair, self-healing, tamper detection, DPAPI encryption, configuration drift detection, offline security, no telemetry, privacy-first, lightweight, Windows security, Rust, autonomous endpoint protection, security timeline
 
 * License *
 
