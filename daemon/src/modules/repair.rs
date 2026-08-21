@@ -256,7 +256,7 @@ pub fn block_bruteforce_ips() -> bool {
     let mut cmd = Command::new("powershell");
     cmd.creation_flags(CREATE_NO_WINDOW);
     cmd.args(["-NoProfile", "-Command",
-        "Get-WinEvent -FilterHashtable @{LogName='Security'; ID=4625} -MaxEvents 50 -ErrorAction SilentlyContinue | ForEach-Object { $_.Properties[19].Value } | Where-Object {$_ -match '\\d+\\.\\d+\\.\\d+\\.\\d+'} | Group-Object | Where-Object {$_.Count -gt 5} | Select-Object -ExpandProperty Name | ForEach-Object { New-NetFirewallRule -DisplayName 'TS-Block-Brute-' + $_ -Direction Inbound -RemoteAddress $_ -Action Block }"]);
+        "Get-WinEvent -FilterHashtable @{LogName='Security'; ID=4625} -MaxEvents 50 -ErrorAction SilentlyContinue | ForEach-Object { $_.Properties[19].Value } | Where-Object {$_ -match '\\d+\\.\\d+\\.\\d+\\.\\d+'} | Group-Object | Where-Object {$_.Count -gt 5} | Select-Object -ExpandProperty Name | ForEach-Object { New-NetFirewallRule -DisplayName ('TS-Block-Brute-' + $_) -Direction Inbound -RemoteAddress $_ -Action Block }"]);
     
     match cmd.output() {
         Ok(output) => {

@@ -309,6 +309,15 @@ fn run_daemon() {
         std::process::exit(1);
     }
 
+    // FIX: server::set_ghost_active() was only ever updated by an explicit
+    // toggle (auto on/off in the monitoring loop, or the /ghost /unghost API)
+    // - never synced from the on-disk ghost.flag at startup. So restarting
+    // the daemon while Ghost Mode was active left /status (and the tray icon)
+    // reporting "ghost: false" indefinitely, even though the real firewall
+    // rule/services were still hardened and the monitoring loop's own
+    // (file-based) is_ghost_active() check knew better.
+    server::set_ghost_active(repair::is_ghost_active());
+
     watcher::start_watching(config::load_watched_folders());
 
     println!("🛡️ Invisibly - Autonomous Endpoint Security");
