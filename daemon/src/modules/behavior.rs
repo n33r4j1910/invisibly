@@ -59,7 +59,14 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
         ));
     }
 
-    if baseline.arp_table != current.arp_table {
+    // FIX: arp/devices only mean something as a spoofing signal when they
+    // change on a network you were already trusting. Switching WiFi networks
+    // makes the ARP table and every device on the new LAN look "new" purely
+    // because it's a different network - that's normal daily activity, not
+    // an attack, and was previously nagging a normal user every time they
+    // reconnected somewhere new. Gate both on network_identity_changed
+    // (already computed above for DNS) the same way.
+    if baseline.arp_table != current.arp_table && !network_identity_changed {
         changes.push((
             "arp".to_string(),
             format!("ARP table changed: {:?}", current.arp_table),
@@ -71,11 +78,15 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
         changes.push((
             "wifi".to_string(),
             format!("WiFi changed from '{}' to '{}'", baseline.wifi_ssid, current.wifi_ssid),
-            "alert".to_string()
+            // FIX: was "alert" (nagged on every network switch). Switching
+            // WiFi networks isn't a security event by itself, so treat it
+            // like tasks/services - silently accept the new network identity
+            // (wifi/dhcp/arp/devices) as the new normal instead of flagging it.
+            "automatic".to_string()
         ));
     }
 
-    if baseline.network_devices != current.network_devices {
+    if baseline.network_devices != current.network_devices && !network_identity_changed {
         changes.push((
             "devices".to_string(),
             format!("New network devices: {:?}", current.network_devices),
@@ -348,7 +359,9 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
     // ============================================
     // NEW: DHCP SPOOFING
     // ============================================
-    if baseline.dhcp_server != current.dhcp_server {
+    // FIX: same as arp/devices above - a DHCP server change is only a
+    // spoofing signal on a network whose identity didn't otherwise change.
+    if baseline.dhcp_server != current.dhcp_server && !network_identity_changed {
         changes.push((
             "dhcp".to_string(),
             current.dhcp_server.clone(), // Pass raw value

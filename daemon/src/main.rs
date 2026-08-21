@@ -49,13 +49,13 @@ fn reload_baseline() -> Option<detect::SystemState> {
     None
 }
 
-fn get_baseline() -> detect::SystemState {
+fn get_baseline(is_elevated_now: bool) -> detect::SystemState {
     let mut guard = BASELINE.lock().unwrap();
     if let Some(state) = guard.as_ref() {
         return state.clone();
     }
     drop(guard);
-    
+
     let status = baseline::verify_baseline();
     if status.exists && status.valid {
         if let Ok(state) = baseline::load_baseline_state() {
@@ -66,8 +66,9 @@ fn get_baseline() -> detect::SystemState {
         }
     }
 
-    println!("📝 Creating new baseline...");
-    let state = detect::collect_state();
+    println!("📝 First run - checking against recommended secure defaults...");
+    let mut state = detect::collect_state();
+    run_first_run_setup(&mut state, is_elevated_now);
     let _ = baseline::create_baseline(&state);
     let mut guard = BASELINE.lock().unwrap();
     *guard = Some(state.clone());
@@ -257,6 +258,159 @@ fn start_tray_if_not_running() {
     } else {
         println!("⚠️ Tray executable not found");
     }
+}
+
+// ============================================
+// AUTOMATIC REPAIR DISPATCH
+// ============================================
+
+/// Applies the automatic-tier repair for one detected category. Shared by
+/// the 30s monitoring loop and first-run setup so there's one place that
+/// knows how to fix each category, not two copies that can drift apart.
+/// Returns (success, baseline_was_synced) - `baseline` is only mutated for
+/// categories with no real revert capability (tasks/services/wifi), which
+/// accept the current state as the new normal instead of pretending a
+/// change was reverted when it wasn't.
+fn apply_automatic_repair(
+    category: &str,
+    baseline: &mut detect::SystemState,
+    current: &detect::SystemState,
+    is_elevated_now: bool,
+) -> (bool, bool) {
+    if !is_elevated_now {
+        println!("⚠️ Skipping {} repair - not elevated", category);
+        return (true, false);
+    }
+    let success = match category {
+        "hosts" => repair::restore_hosts(),
+        "proxy" => repair::remove_proxy(),
+        "defender" => repair::enable_defender(),
+        "uac" => repair::enable_uac(),
+        "wu" => repair::enable_windows_update(),
+        "sr" => repair::enable_system_restore(),
+        "smartscreen" => repair::enable_smart_screen(),
+        "ipv6" => repair::enable_ipv6(),
+        "wifi_profile" => repair::set_wifi_private(),
+        "trojan_source" => repair::clean_unicode_bidi(),
+        "rdp" => repair::disable_rdp(),
+        "startup" => { repair::quarantine_startup(); true }
+        "fakeext" => { repair::delete_fake_files(); true }
+        "bt" => { repair::force_disable_bt_devices(); true }
+        "hid" => { repair::force_disable_hid_devices(); true }
+        "bruteforce" => repair::block_bruteforce_ips(),
+        "adapter" => { repair::force_disable_unknown_adapters(); true }
+        "tasks" => {
+            baseline.scheduled_tasks = current.scheduled_tasks.clone();
+            true
+        }
+        "services" => {
+            baseline.services_list = current.services_list.clone();
+            true
+        }
+        // FIX: switching WiFi networks isn't a security event - accept the
+        // new network identity (SSID + its correlated DHCP/ARP/device list)
+        // as the new normal instead of flagging every reconnect.
+        "wifi" => {
+            baseline.wifi_ssid = current.wifi_ssid.clone();
+            baseline.dhcp_server = current.dhcp_server.clone();
+            baseline.arp_table = current.arp_table.clone();
+            baseline.network_devices = current.network_devices.clone();
+            true
+        }
+        _ => true,
+    };
+    if !success {
+        println!("❌ Auto-repair failed for: {}", category);
+    }
+    let synced = matches!(category, "tasks" | "services" | "wifi");
+    (success, synced)
+}
+
+// ============================================
+// FIRST-RUN SETUP - compare against recommended secure defaults
+// ============================================
+
+/// Builds a synthetic "ideal" reference state for first-run comparison.
+/// Only overrides the signals that have one universally correct answer
+/// regardless of whose PC this is (Defender on, RDP off, no bloatware...).
+/// Everything else (your WiFi name, your devices, your installed software,
+/// your startup apps) is left equal to `current` - there's no universal
+/// "correct" value for those, so they're never flagged on first run.
+///
+/// Known gap: hosts_hash and firewall_profiles are deliberately left out -
+/// there's no reliable hardcoded "clean" hosts hash across Windows
+/// locales/versions, and the firewall diff format is a parsed profile list
+/// that's fragile to hand-construct correctly. A machine with an already-
+/// poisoned hosts file or an already-disabled firewall at first launch
+/// won't be caught by this - a real limitation of a non-signature-based
+/// tool, not something silently pretended away.
+fn ideal_reference(current: &detect::SystemState) -> detect::SystemState {
+    let mut ideal = current.clone();
+    ideal.defender_status = "ON".to_string();
+    ideal.uac_status = "ON".to_string();
+    ideal.windows_update_status = "ON".to_string();
+    ideal.system_restore_status = "ON".to_string();
+    ideal.smart_screen_status = "ON".to_string();
+    ideal.ipv6_status = "ON".to_string();
+    ideal.doh_status = "ON".to_string();
+    ideal.laps_status = "ENABLED".to_string();
+    ideal.bitlocker_status = "ON".to_string();
+    ideal.credential_guard_status = "ON".to_string();
+    ideal.secure_boot = "ON".to_string();
+    ideal.proxy_settings = Vec::new();
+    ideal.fake_extensions = Vec::new();
+    ideal.unicode_bidi_files = Vec::new();
+    ideal.homoglyph_domains = Vec::new();
+    ideal.installed_software = Vec::new();
+    // RDP: the detector has no clean explicit "off" string (falls through
+    // to an error string when the service isn't running) - only force a
+    // diff when the current value is actually one of the known "on" signals.
+    if current.rdp_status == "LISTENING" || current.rdp_status == "RUNNING" {
+        ideal.rdp_status = "OFF".to_string();
+    }
+    ideal
+}
+
+/// Runs once, only when no baseline exists yet. Diffs the fresh state
+/// against `ideal_reference()` and applies/queues findings through the
+/// exact same automatic/confirm/alert pipeline as ongoing drift detection -
+/// no new UI, no new endpoint, reuses the tray's existing pending-approval
+/// badge for anything that needs a human call (RDP, firewall, BitLocker...).
+fn run_first_run_setup(state: &mut detect::SystemState, is_elevated_now: bool) {
+    let ideal = ideal_reference(state);
+    let setup_issues = behavior::detect_all_changes(&ideal, state);
+
+    if setup_issues.is_empty() {
+        println!("✅ First run - already matches recommended secure defaults");
+        return;
+    }
+
+    println!("🔧 First run - found {} recommended fixes", setup_issues.len());
+    for (category, details, action_type) in &setup_issues {
+        match action_type.as_str() {
+            "automatic" => {
+                let current_snapshot = state.clone();
+                apply_automatic_repair(category, state, &current_snapshot, is_elevated_now);
+            }
+            "confirm" => {
+                let _ = timeline::add_entry(
+                    category,
+                    "pending_approval",
+                    details,
+                    "found during first-run setup",
+                    timeline::RepairResult::AwaitingApproval
+                );
+            }
+            "alert" | "manual" => {
+                println!("⚠️ First run: {} - {} (not auto-fixed, review manually)", category, details);
+            }
+            _ => {}
+        }
+    }
+
+    // Re-snapshot so the baseline reflects what actually landed, not what
+    // was attempted - some fixes (e.g. GPO-locked settings) can fail.
+    *state = detect::collect_state();
 }
 
 // ============================================
@@ -490,7 +644,7 @@ fn run_daemon() {
     println!("✅ API server started - Dashboard: http://127.0.0.1:12790");
     println!("");
 
-    let baseline = get_baseline();
+    let baseline = get_baseline(is_elevated_now);
     let home_ssid = config::load_home_ssid().unwrap_or_else(|| "Unknown".into());
 
     println!("🔍 [1/6] Collecting state...");
@@ -544,7 +698,7 @@ fn run_daemon() {
             continue;
         }
 
-        let mut baseline = get_baseline();
+        let mut baseline = get_baseline(is_elevated_now);
         let current = detect::collect_state();
 
         let baseline_status = baseline::verify_baseline();
@@ -588,46 +742,9 @@ fn run_daemon() {
             for (category, details, action_type) in &issues {
                 match action_type.as_str() {
                     "automatic" => {
-                        let success = if !is_elevated_now {
-                            println!("⚠️ Skipping {} repair - not elevated", category);
-                            true
-                        } else {
-                            match category.as_str() {
-                                "hosts" => repair::restore_hosts(),
-                                "proxy" => repair::remove_proxy(),
-                                "defender" => repair::enable_defender(),
-                                "uac" => repair::enable_uac(),
-                                "wu" => repair::enable_windows_update(),
-                                "sr" => repair::enable_system_restore(),
-                                "smartscreen" => repair::enable_smart_screen(),
-                                "ipv6" => repair::enable_ipv6(),
-                                "wifi_profile" => repair::set_wifi_private(),
-                                "trojan_source" => repair::clean_unicode_bidi(),
-                                "rdp" => repair::disable_rdp(),
-                                "startup" => { repair::quarantine_startup(); true }
-                                "fakeext" => { repair::delete_fake_files(); true }
-                                "bt" => { repair::force_disable_bt_devices(); true }
-                                "hid" => { repair::force_disable_hid_devices(); true }
-                                "bruteforce" => { repair::block_bruteforce_ips(); true }
-                                "adapter" => { repair::force_disable_unknown_adapters(); true }
-                                // No revert capability for tasks/services yet - accept
-                                // current state as the new baseline instead of lying
-                                // about a repair that never happened.
-                                "tasks" => {
-                                    baseline.scheduled_tasks = current.scheduled_tasks.clone();
-                                    baseline_synced = true;
-                                    true
-                                }
-                                "services" => {
-                                    baseline.services_list = current.services_list.clone();
-                                    baseline_synced = true;
-                                    true
-                                }
-                                _ => true,
-                            }
-                        };
-                        if !success {
-                            println!("❌ Auto-repair failed for: {}", category);
+                        let (_success, synced) = apply_automatic_repair(category, &mut baseline, &current, is_elevated_now);
+                        if synced {
+                            baseline_synced = true;
                         }
                     }
                     "confirm" => {
