@@ -272,9 +272,30 @@ fn run_daemon() {
     if !is_elevated_now {
         println!("⚠️ Running unelevated. Attempting to create Scheduled Task for elevation...");
         if ensure_scheduled_task() {
-            println!("✅ Scheduled Task created. Daemon will run elevated on next login.");
-            println!("💡 For now, running in monitor-only mode.");
-            println!("   Auto-repair will work after next login or restart.");
+            // FIX: previously this just sat in monitor-only mode until the
+            // *next full logon* - meaning a manual restart (double-click,
+            // Start menu) never regained elevation, and every "automatic"
+            // repair below is unconditionally skipped while unelevated, so
+            // the integrity score could never climb back up without the
+            // user logging off/on. The Scheduled Task is already registered
+            // with /rl highest by a prior elevated run, so `schtasks /run`
+            // launches it elevated immediately - silently, no UAC prompt,
+            // same as Windows already does at logon - instead of waiting.
+            println!("🔼 Scheduled Task exists - launching it elevated now instead of waiting for next login...");
+            let run_result = Command::new("schtasks")
+                .args(["/run", "/tn", SCHEDULED_TASK_NAME])
+                .creation_flags(CREATE_NO_WINDOW)
+                .output();
+            let launched = matches!(&run_result, Ok(o) if o.status.success());
+            if launched {
+                println!("✅ Elevated instance launching - this unelevated instance is stepping aside.");
+                return;
+            }
+            if let Ok(o) = &run_result {
+                println!("⚠️ Could not launch elevated task ({}). Running in monitor-only mode.", String::from_utf8_lossy(&o.stderr));
+            } else if let Err(e) = &run_result {
+                println!("⚠️ Could not launch elevated task ({}). Running in monitor-only mode.", e);
+            }
         } else {
             println!("⚠️ Could not create Scheduled Task. Running in monitor-only mode.");
         }

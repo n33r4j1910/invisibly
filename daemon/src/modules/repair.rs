@@ -701,11 +701,11 @@ pub fn ghost_mode_on() -> bool {
     cmd2.creation_flags(CREATE_NO_WINDOW);
     cmd2.args(["-NoProfile", "-Command",
         "New-NetFirewallRule -DisplayName 'TS-Block-ICMP' -Direction Inbound -Protocol ICMPv4 -Action Block;",
-        "New-NetFirewallRule -DisplayName 'TS-Block-Mal-Ports' -Direction Inbound -LocalPort 4444,5555,6667,8080,8888,31337,3389,5900,5800,5938,21,23,25,110,143,993,995,3306,5432,1433,1521,27017,6379,11211,5000,4500,5060 -Action Block;",
+        "New-NetFirewallRule -DisplayName 'TS-Block-Mal-Ports' -Direction Inbound -Protocol TCP -LocalPort 4444,5555,6667,8080,8888,31337,3389,5900,5800,5938,21,23,25,110,143,993,995,3306,5432,1433,1521,27017,6379,11211,5000,4500,5060 -Action Block;",
         "Get-NetFirewallRule -DisplayGroup 'Network Discovery' | Disable-NetFirewallRule;",
         "Get-NetFirewallRule -DisplayGroup 'File and Printer Sharing' | Disable-NetFirewallRule;",
         "Stop-Service -Name 'FDResPub','SSDPSRV','upnphost','bthserv' -Force;",
-        "Set-Service -Name 'FDResPub','SSDPSRV','upnphost','bthserv' -StartupType Disabled;"]);
+        "'FDResPub','SSDPSRV','upnphost','bthserv' | ForEach-Object { Set-Service -Name $_ -StartupType Disabled };"]);
     let result2 = run_command(&mut cmd2, "GhostMode", "Enabled - Inbound hardening active (outbound unaffected)");
 
     // FIX: Verify the state we actually care about instead of trusting a
@@ -736,7 +736,7 @@ pub fn ghost_mode_off() -> bool {
         "Set-NetFirewallProfile -All -DefaultOutboundAction Allow;",
         "Get-NetFirewallRule -DisplayGroup 'Network Discovery' | Enable-NetFirewallRule;",
         "Get-NetFirewallRule -DisplayGroup 'File and Printer Sharing' | Enable-NetFirewallRule;",
-        "Set-Service -Name 'FDResPub','SSDPSRV','upnphost','bthserv' -StartupType Manual;"]);
+        "'FDResPub','SSDPSRV','upnphost','bthserv' | ForEach-Object { Set-Service -Name $_ -StartupType Manual };"]);
     let result2 = run_command(&mut cmd2, "GhostMode", "Disabled - Normal operation restored");
 
     let verified = verify_ghost_rule_present(false);
