@@ -66,10 +66,19 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
     // an attack, and was previously nagging a normal user every time they
     // reconnected somewhere new. Gate both on network_identity_changed
     // (already computed above for DNS) the same way.
-    if baseline.arp_table != current.arp_table && !network_identity_changed {
+    // FIX: only flag genuinely NEW ARP entries, not "the list looks
+    // different somehow" - an entry disappearing (a device went idle/left)
+    // is never itself suspicious, and exact-list comparison was re-firing
+    // on harmless churn every cycle. A changed MAC for a known IP still
+    // shows up here as a new (ip, mac) string, so real spoofing is still
+    // caught - only the noise from things settling down is gone.
+    let new_arp_entries: Vec<&String> = current.arp_table.iter()
+        .filter(|e| !baseline.arp_table.contains(e))
+        .collect();
+    if !new_arp_entries.is_empty() && !network_identity_changed {
         changes.push((
             "arp".to_string(),
-            format!("ARP table changed: {:?}", current.arp_table),
+            format!("New ARP entries: {:?}", new_arp_entries),
             "alert".to_string()
         ));
     }
@@ -280,10 +289,16 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
     // PROCESS CHANGES
     // ============================================
 
-    if baseline.suspicious_processes != current.suspicious_processes {
+    // FIX: exact-list comparison re-fired every cycle as processes running
+    // from Temp/Downloads/Desktop simply exited (never itself suspicious) -
+    // only a genuinely NEW one appearing is the real signal.
+    let new_suspicious: Vec<&String> = current.suspicious_processes.iter()
+        .filter(|p| !p.starts_with("ERROR_") && !baseline.suspicious_processes.contains(p))
+        .collect();
+    if !new_suspicious.is_empty() {
         changes.push((
             "susp_proc".to_string(),
-            format!("Suspicious processes: {:?}", current.suspicious_processes),
+            format!("New suspicious processes: {:?}", new_suspicious),
             "alert".to_string()
         ));
     }

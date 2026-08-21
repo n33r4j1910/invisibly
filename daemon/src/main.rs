@@ -36,6 +36,17 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 pub static BASELINE: once_cell::sync::Lazy<Mutex<Option<detect::SystemState>>> =
     once_cell::sync::Lazy::new(|| Mutex::new(None));
 
+// FIX: tracks which categories have already had trust deducted for their
+// *current* occurrence, so a persistent condition (e.g. BitLocker off,
+// which many machines simply don't have available) gets charged once, not
+// every ~2min cycle forever. See TRUST_PENALIZED usage in the monitoring
+// loop for the full story - this used to be an unconditional re-deduction
+// on every cycle an issue was still present, which meant trust could only
+// ever ratchet down to 0 and never recover as long as any one known,
+// already-reviewed issue remained.
+static TRUST_PENALIZED: once_cell::sync::Lazy<Mutex<std::collections::HashSet<String>>> =
+    once_cell::sync::Lazy::new(|| Mutex::new(std::collections::HashSet::new()));
+
 fn reload_baseline() -> Option<detect::SystemState> {
     let status = baseline::verify_baseline();
     if status.exists && status.valid {
@@ -804,8 +815,24 @@ fn run_daemon() {
         let report = integrity::calculate(&issues_for_score_final, is_lockdown, is_baseline_valid);
         server::set_integrity_report(report.clone());
 
-        if !issues_final.is_empty() {
-            for (category, _, _) in &issues_final {
+        // FIX: only deduct trust for a category the cycle it NEWLY appears,
+        // not every cycle it's still present - see TRUST_PENALIZED above.
+        // Recovery now fires whenever nothing NEW went wrong this cycle,
+        // even if one known, already-charged-for issue (e.g. BitLocker
+        // permanently off) is still sitting there - trust represents
+        // whether new bad things are happening, not whether an old, already
+        // priced-in condition still technically exists.
+        {
+            let mut penalized = TRUST_PENALIZED.lock().unwrap();
+            let current_categories: std::collections::HashSet<String> =
+                issues_final.iter().map(|(cat, _, _)| cat.clone()).collect();
+            let mut newly_penalized = false;
+
+            for category in &current_categories {
+                if penalized.contains(category) {
+                    continue;
+                }
+                newly_penalized = true;
                 match category.as_str() {
                     "firewall" | "defender" | "uac" | "wu" | "sr" | "smartscreen" | "secureboot" | "bitlocker" | "credguard" => {
                         trust::deduct_trust(&format!("{} compromised", category), 10);
@@ -816,8 +843,15 @@ fn run_daemon() {
                     _ => {}
                 }
             }
-        } else {
-            trust::recover_trust(2);
+
+            // Categories that resolved stop being tracked, so they're
+            // treated as fresh (and re-deducted once) if they recur later.
+            penalized.retain(|c| current_categories.contains(c));
+            penalized.extend(current_categories);
+
+            if !newly_penalized {
+                trust::recover_trust(2);
+            }
         }
 
         server::set_trust_level(trust::get_trust_score());
