@@ -8,6 +8,9 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::path::Path;
 use std::os::windows::process::CommandExt;
+use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
+use windows::Win32::System::Threading::CreateMutexW;
+use windows::core::w;
 
 mod modules;
 use modules::detect;
@@ -150,10 +153,37 @@ fn ensure_scheduled_task() -> bool {
 }
 
 // ============================================
+// SINGLE INSTANCE GUARD
+// ============================================
+
+// Without this, a second launch (e.g. the Store cert kit's repeat-launch
+// test, or a user reopening the app while it's already running from the
+// Scheduled Task) hits the API server's port-already-in-use error and the
+// spawned server thread hard-exits via std::process::exit(1) - silent,
+// windowless (windows_subsystem = "windows"), and indistinguishable from a
+// crash. Reproduced locally: a second invisibly-daemon.exe process exits
+// with code 1 within ~2s and no visible error, matching a certification
+// report of "crashes after launch, Error Message: N/A".
+fn check_single_instance() -> bool {
+    unsafe {
+        let handle = CreateMutexW(None, true, w!("Global\\InvisiblyDaemonMutex"));
+        if handle.is_ok() {
+            GetLastError().0 != ERROR_ALREADY_EXISTS.0
+        } else {
+            false
+        }
+    }
+}
+
+// ============================================
 // MAIN - Entry point (No service dispatcher)
 // ============================================
 
 fn main() {
+    if !check_single_instance() {
+        println!("⚠️ Invisibly daemon is already running - exiting quietly.");
+        return;
+    }
     run_daemon();
 }
 
