@@ -603,6 +603,9 @@ pub fn alert_credential_guard_off() -> bool {
 /// Executes a repair that was previously flagged as "confirm-required"
 /// This is called from the /approve API endpoint after user approval
 pub fn execute_confirmed_repair(category: &str) -> String {
+    if !crate::modules::license::is_pro_licensed() {
+        return "Pro subscription required to apply this fix - detection stays free, repair is a paid feature.".to_string();
+    }
     match category {
         "rdp" => {
             if disable_rdp() {
@@ -689,6 +692,10 @@ pub fn execute_confirmed_repair(category: &str) -> String {
 /// inbound ICMP, hide from network discovery/file sharing, stop discovery
 /// services) - it never touches outbound traffic, so it can't break DNS/browsing.
 pub fn ghost_mode_on() -> bool {
+    if !crate::modules::license::is_pro_licensed() {
+        log_repair("GhostMode", "🔒 Skipped - Pro subscription required");
+        return false;
+    }
     let mut cmd1 = Command::new("powershell");
     cmd1.creation_flags(CREATE_NO_WINDOW);
     cmd1.args(["-NoProfile", "-Command",

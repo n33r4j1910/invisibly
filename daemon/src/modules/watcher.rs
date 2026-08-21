@@ -69,7 +69,13 @@ pub fn start_watching(folders: Vec<String>) {
 
                     if recent_events.len() >= BURST_THRESHOLD {
                         let cooldown_ok = last_alert.map_or(true, |t| now.duration_since(t) > ALERT_COOLDOWN);
-                        if cooldown_ok {
+                        // Real-time ransomware watch is a paid feature. Gated here
+                        // (at alert emission) rather than at start_watching() so a
+                        // license purchased/lapsed mid-session takes effect
+                        // immediately without needing a daemon restart, and so the
+                        // burst-detection window itself keeps running regardless -
+                        // only the alert/notification is withheld from free tier.
+                        if cooldown_ok && crate::modules::license::is_pro_licensed() {
                             let count = recent_events.len();
                             println!("🚨 Possible ransomware activity: {} file changes in {}s across watched folders", count, BURST_WINDOW.as_secs());
                             crate::modules::server::set_ransomware_alert(true);

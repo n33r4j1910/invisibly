@@ -19,6 +19,9 @@ pub mod behavior;
 // Real-time ransomware-pattern detection (separate from the 30s poll cycle)
 pub mod watcher;
 
+// Store subscription licensing - gates the paid feature tier
+pub mod license;
+
 // Tests
 #[cfg(test)]
 mod integrity_tests;

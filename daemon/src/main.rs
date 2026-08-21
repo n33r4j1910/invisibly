@@ -24,6 +24,7 @@ use modules::baseline;
 use modules::trust;
 use modules::behavior;
 use modules::watcher;
+use modules::license;
 
 const DATA_DIR: &str = "C:\\ProgramData\\Invisibly";
 const SCHEDULED_TASK_NAME: &str = "InvisiblyDaemon";
@@ -290,6 +291,18 @@ fn apply_automatic_repair(
 ) -> (bool, bool) {
     if !is_elevated_now {
         println!("⚠️ Skipping {} repair - not elevated", category);
+        return (true, false);
+    }
+    // FIX: tasks/services/wifi are baseline-hygiene syncs, not security
+    // fixes - they exist purely to stop re-flagging normal drift (a
+    // WiFi switch, a routine service change) as an ongoing issue. Gating
+    // these behind a subscription would reintroduce the exact re-nagging
+    // noise this session already fixed, for every free-tier user, since
+    // free tier still needs accurate detection/scoring. Only the actual
+    // security-fix categories below require an active subscription.
+    let is_baseline_hygiene = matches!(category, "tasks" | "services" | "wifi");
+    if !is_baseline_hygiene && !license::is_pro_licensed() {
+        println!("🔒 Skipping {} repair - Pro subscription required (detected, not auto-fixed)", category);
         return (true, false);
     }
     let success = match category {
@@ -567,6 +580,7 @@ fn run_daemon() {
     // hasn't started yet.
     wait_for_consent();
 
+    license::start_license_check_thread();
     watcher::start_watching(config::load_watched_folders());
 
     std::thread::spawn(|| {

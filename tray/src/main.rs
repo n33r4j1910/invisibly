@@ -49,6 +49,12 @@ struct DaemonStatus {
     // on the user to accept the privacy policy/terms on the dashboard.
     #[serde(default)]
     awaiting_consent: bool,
+    // Whether the Pro subscription is active - gates auto-repair, Ghost
+    // Mode, and the real-time ransomware watcher. Defaults to true so an
+    // older daemon build that doesn't send this field doesn't wrongly
+    // hide paid-tier UI for someone who's actually subscribed.
+    #[serde(default = "default_true")]
+    is_pro: bool,
 }
 
 #[derive(Debug)]
@@ -399,6 +405,9 @@ impl ApplicationHandler<UserEvent> for TrayApp {
                 }
 
                 if let Some(tray) = &self.tray {
+                    let is_pro = status.as_ref().map(|s| s.is_pro).unwrap_or(true);
+                    let awaiting = status.as_ref().map(|s| s.awaiting_consent).unwrap_or(false);
+                    let has_status = status.is_some();
                     let (icon, tooltip) = match status {
                         Some(s) => {
                             println!("📊 Status: score={:?}, state={:?}, ghost={}, enabled={}", 
@@ -468,6 +477,17 @@ impl ApplicationHandler<UserEvent> for TrayApp {
                             println!("⚠️ No status received - daemon offline");
                             (self.icons.4.clone(), "⚪ Daemon offline".to_string())
                         }
+                    };
+                    // Free tier gets detection only (auto-repair, Ghost Mode, and
+                    // the ransomware watcher are Pro) - surface that in the
+                    // tooltip so a free user isn't left wondering why a detected
+                    // issue never gets fixed. Skipped while awaiting consent
+                    // (nothing meaningful to qualify yet) and when the daemon is
+                    // offline (that message already says everything it needs to).
+                    let tooltip = if !is_pro && !awaiting && has_status {
+                        format!("{}\n(Free tier - detection only, upgrade for auto-repair)", tooltip)
+                    } else {
+                        tooltip
                     };
                     println!("🎨 Setting icon and tooltip");
                     let _ = tray.set_icon(Some(icon));

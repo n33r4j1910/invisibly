@@ -510,7 +510,7 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str, c
                 let ransomware_alert = is_ransomware_alert();
 
                 json_response(200, &format!(
-                    r#"{{"status":"ok","trust_state":"{}","ghost":{},"enabled":{},"integrity_score":{},"integrity_state":"{}","trust_level":{},"elevated":{},"tamper_detected":{},"ransomware_alert":{},"awaiting_consent":{}}}"#,
+                    r#"{{"status":"ok","trust_state":"{}","ghost":{},"enabled":{},"integrity_score":{},"integrity_state":"{}","trust_level":{},"elevated":{},"tamper_detected":{},"ransomware_alert":{},"awaiting_consent":{},"is_pro":{}}}"#,
                     trust_state,
                     ghost,
                     enabled,
@@ -520,7 +520,8 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str, c
                     elevated,
                     tamper_detected,
                     ransomware_alert,
-                    is_awaiting_consent()
+                    is_awaiting_consent(),
+                    crate::modules::license::is_pro_licensed()
                 ))
             }
             ("GET", "/dashboard") => {
@@ -557,8 +558,9 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str, c
                     let elevated = is_elevated();
                     let tamper_detected = is_tamper_detected();
                     let ransomware_alert = is_ransomware_alert();
+                    let is_pro = crate::modules::license::is_pro_licensed();
                     json_response(200, &format!(
-                        r#"{{"trust_state":"{}","ghost":{},"enabled":{},"integrity_score":{},"trust_level":{},"elevated":{},"tamper_detected":{},"ransomware_alert":{}}}"#,
+                        r#"{{"trust_state":"{}","ghost":{},"enabled":{},"integrity_score":{},"trust_level":{},"elevated":{},"tamper_detected":{},"ransomware_alert":{},"is_pro":{}}}"#,
                         trust_state,
                         ghost,
                         enabled,
@@ -566,7 +568,8 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str, c
                         trust_level,
                         elevated,
                         tamper_detected,
-                        ransomware_alert
+                        ransomware_alert,
+                        is_pro
                     ))
                 }
             }
@@ -638,6 +641,8 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str, c
             ("POST", "/ghost") => {
                 if !validate_auth(&headers, token) {
                     unauthorized()
+                } else if !crate::modules::license::is_pro_licensed() {
+                    json_response(402, r#"{"status":"error","message":"Ghost Mode requires an active Pro subscription"}"#)
                 } else if crate::modules::repair::ghost_mode_on() {
                     set_ghost_active(true);
                     let ghost_flag = format!("{}\\ghost.flag", DATA_DIR);
