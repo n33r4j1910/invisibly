@@ -12,7 +12,6 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::path::Path;
 use std::time::Duration;
-use std::sync::atomic::AtomicPtr;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicUsize;
 
@@ -40,23 +39,23 @@ static ACTIVE_CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
 // TRUST STATE (Legacy)
 // ============================================
 
-static TRUST_STATE: AtomicPtr<()> = AtomicPtr::new(std::ptr::null_mut());
+// FIX: this used to store a &'static str as a raw AtomicPtr<()> and read it
+// back via CStr::from_ptr - but a Rust &str is a (pointer, length) pair, not
+// a null-terminated C string. CStr::from_ptr ignored the real length and
+// scanned memory for the next zero byte, reading straight past "Trusted"
+// into whatever string literal the compiler placed next in .rdata (observed
+// live: get_trust_state() returned "Trusted" followed by an unrelated error
+// message from elsewhere in the binary). That garbage then went straight
+// into unescaped JSON in the /status response, breaking the tray's parser
+// and making a perfectly healthy daemon look "offline".
+static TRUST_STATE: Mutex<&'static str> = Mutex::new("Trusted");
 
 pub fn set_trust_state(state: &'static str) {
-    let ptr = state.as_ptr() as *mut ();
-    TRUST_STATE.store(ptr, Ordering::Release);
+    *TRUST_STATE.lock().unwrap() = state;
 }
 
 pub fn get_trust_state() -> String {
-    let ptr = TRUST_STATE.load(Ordering::Acquire);
-    if ptr.is_null() {
-        "Trusted".to_string()
-    } else {
-        unsafe {
-            let bytes = std::ffi::CStr::from_ptr(ptr as *const i8);
-            bytes.to_string_lossy().into_owned()
-        }
-    }
+    TRUST_STATE.lock().unwrap().to_string()
 }
 
 // ============================================
