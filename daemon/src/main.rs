@@ -425,6 +425,31 @@ fn run_first_run_setup(state: &mut detect::SystemState, is_elevated_now: bool) {
 }
 
 // ============================================
+// FIRST-RUN CONSENT GATE
+// ============================================
+
+fn is_consent_accepted() -> bool {
+    Path::new(&format!("{}\\consent_accepted.txt", DATA_DIR)).exists()
+}
+
+/// Blocks until the user accepts on the dashboard's consent screen
+/// (server.rs's POST /accept_consent writes the flag this checks for).
+/// A no-op on every run after the first, since the flag persists.
+fn wait_for_consent() {
+    if is_consent_accepted() {
+        server::set_awaiting_consent(false);
+        return;
+    }
+    println!("📋 Awaiting privacy/terms acceptance - open the dashboard to continue...");
+    server::set_awaiting_consent(true);
+    while !is_consent_accepted() {
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    server::set_awaiting_consent(false);
+    println!("✅ Consent accepted - starting monitoring");
+}
+
+// ============================================
 // DAEMON CORE LOGIC
 // ============================================
 
@@ -483,12 +508,11 @@ fn run_daemon() {
     // (file-based) is_ghost_active() check knew better.
     server::set_ghost_active(repair::is_ghost_active());
 
-    watcher::start_watching(config::load_watched_folders());
-
     println!("🛡️ Invisibly - Autonomous Endpoint Security");
     println!("📡 Detects 35 signals - Auto-repairs - Integrity Score - Real-time ransomware watch");
     println!("");
 
+    timeline::init_counter();
     let chain_valid = timeline::verify_chain_on_startup();
     if !chain_valid {
         println!("🔴 CRITICAL: Timeline chain verification FAILED!");
@@ -532,6 +556,18 @@ fn run_daemon() {
             }
         }
     });
+
+    // First launch: don't collect or process any system data until the
+    // user has actively opted in via the dashboard's consent screen (the
+    // privacy policy itself already promises consent is obtained before
+    // processing starts - this makes that actually true instead of just
+    // claimed). Placed AFTER the API server thread spawn above so the
+    // consent page is actually reachable while this blocks - putting it
+    // before the spawn deadlocks the daemon waiting on a server that
+    // hasn't started yet.
+    wait_for_consent();
+
+    watcher::start_watching(config::load_watched_folders());
 
     std::thread::spawn(|| {
         loop {

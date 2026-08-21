@@ -45,6 +45,10 @@ struct DaemonStatus {
     // watched folder - possible ransomware activity, not just config drift.
     #[serde(default)]
     ransomware_alert: bool,
+    // First launch, no data collection/monitoring has started yet - waiting
+    // on the user to accept the privacy policy/terms on the dashboard.
+    #[serde(default)]
+    awaiting_consent: bool,
 }
 
 #[derive(Debug)]
@@ -400,10 +404,14 @@ impl ApplicationHandler<UserEvent> for TrayApp {
                             println!("📊 Status: score={:?}, state={:?}, ghost={}, enabled={}", 
                                      s.integrity_score, s.integrity_state, s.ghost, s.enabled);
                             
-                            // Highest priority: an active, time-critical attack in
-                            // progress beats a standing integrity concern, which
-                            // beats everything else.
-                            if s.ransomware_alert {
+                            // Highest priority: nothing is being monitored yet until
+                            // the user accepts the privacy policy/terms, which beats
+                            // everything else since none of it is meaningful yet.
+                            // Then an active, time-critical attack in progress beats
+                            // a standing integrity concern, which beats everything else.
+                            if s.awaiting_consent {
+                                (self.icons.4.clone(), "⚙️ Setup needed - open the dashboard to get started\nRight-click for menu".to_string())
+                            } else if s.ransomware_alert {
                                 (self.icons.2.clone(), "🔴 POSSIBLE RANSOMWARE - rapid file changes detected\nOpen Dashboard now".to_string())
                             } else if s.tamper_detected {
                                 (self.icons.2.clone(), "🔴 SECURITY ALERT - executable may be tampered\nOpen Dashboard for details".to_string())

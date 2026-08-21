@@ -73,6 +73,23 @@ pub fn is_ghost_active() -> bool {
 }
 
 // ============================================
+// FIRST-RUN CONSENT
+// ============================================
+
+// Defaults to true (awaiting) until main.rs checks the on-disk flag at
+// startup and flips it - assume no consent has been given until proven
+// otherwise, never the reverse.
+static AWAITING_CONSENT: AtomicBool = AtomicBool::new(true);
+
+pub fn set_awaiting_consent(awaiting: bool) {
+    AWAITING_CONSENT.store(awaiting, Ordering::Release);
+}
+
+pub fn is_awaiting_consent() -> bool {
+    AWAITING_CONSENT.load(Ordering::Acquire)
+}
+
+// ============================================
 // TS2 TOGGLE (ON/OFF)
 // ============================================
 
@@ -380,12 +397,14 @@ pub fn run() -> std::io::Result<()> {
     println!("🔑 Auth token: {}", token);
 
     let dashboard_html = include_str!("../web/dashboard.html");
+    let consent_html = build_consent_html();
 
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
                 let token_clone = token.clone();
                 let dashboard_clone = dashboard_html.to_string();
+                let consent_clone = consent_html.clone();
                 std::thread::spawn(move || {
                     let mut stream = stream;
                     let current = ACTIVE_CONNECTIONS.load(Ordering::SeqCst);
@@ -395,7 +414,7 @@ pub fn run() -> std::io::Result<()> {
                         return;
                     }
                     ACTIVE_CONNECTIONS.fetch_add(1, Ordering::SeqCst);
-                    handle_connection(stream, &token_clone, &dashboard_clone);
+                    handle_connection(stream, &token_clone, &dashboard_clone, &consent_clone);
                     ACTIVE_CONNECTIONS.fetch_sub(1, Ordering::SeqCst);
                 });
             }
@@ -405,6 +424,27 @@ pub fn run() -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+// ============================================
+// CONSENT PAGE
+// ============================================
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
+/// Builds the first-run consent page by embedding the actual shipped
+/// Privacy Policy and EULA text (single source of truth - these files,
+/// not a copy pasted into the page) so what the user reads here always
+/// matches what's in the package.
+fn build_consent_html() -> String {
+    let template = include_str!("../web/consent.html");
+    let privacy = include_str!("../../../msix_package/privacy.html");
+    let license = include_str!("../../../LICENSE.txt");
+    template
+        .replace("__PRIVACY_POLICY_TEXT__", &html_escape(privacy))
+        .replace("__LICENSE_TEXT__", &html_escape(license))
 }
 
 // ============================================
@@ -422,9 +462,9 @@ fn validate_auth(headers: &str, token: &str) -> bool {
 // CONNECTION HANDLER
 // ============================================
 
-fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
+fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str, consent_html: &str) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(READ_TIMEOUT_SECS)));
-    
+
     let mut buffer = [0; 4096];
     if let Ok(n) = stream.read(&mut buffer) {
         if n == 0 { return; }
@@ -442,8 +482,8 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
             return;
         }
 
-        let is_auth_required = !matches!(path.as_str(), "/" | "/dashboard" | "/token");
-        
+        let is_auth_required = !matches!(path.as_str(), "/" | "/dashboard" | "/token" | "/accept_consent");
+
         if is_auth_required && !validate_auth(&headers, token) {
             let _ = stream.write_all(unauthorized().as_bytes());
             let _ = stream.flush();
@@ -470,7 +510,7 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                 let ransomware_alert = is_ransomware_alert();
 
                 json_response(200, &format!(
-                    r#"{{"status":"ok","trust_state":"{}","ghost":{},"enabled":{},"integrity_score":{},"integrity_state":"{}","trust_level":{},"elevated":{},"tamper_detected":{},"ransomware_alert":{}}}"#,
+                    r#"{{"status":"ok","trust_state":"{}","ghost":{},"enabled":{},"integrity_score":{},"integrity_state":"{}","trust_level":{},"elevated":{},"tamper_detected":{},"ransomware_alert":{},"awaiting_consent":{}}}"#,
                     trust_state,
                     ghost,
                     enabled,
@@ -479,11 +519,30 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str) {
                     trust_level,
                     elevated,
                     tamper_detected,
-                    ransomware_alert
+                    ransomware_alert,
+                    is_awaiting_consent()
                 ))
             }
             ("GET", "/dashboard") => {
-                html_response(dashboard_html)
+                if is_awaiting_consent() {
+                    html_response(consent_html)
+                } else {
+                    html_response(dashboard_html)
+                }
+            }
+            ("POST", "/accept_consent") => {
+                let path = format!("{}\\consent_accepted.txt", DATA_DIR);
+                let record = format!(
+                    "Accepted at {} (Privacy Policy + Terms of Use, active opt-in)\n",
+                    chrono::Local::now().to_rfc3339()
+                );
+                match fs::write(&path, record) {
+                    Ok(_) => {
+                        set_awaiting_consent(false);
+                        json_response(200, r#"{"status":"ok"}"#)
+                    }
+                    Err(e) => json_response(500, &format!(r#"{{"error":"{}"}}"#, e))
+                }
             }
             ("GET", "/status") => {
                 if !validate_auth(&headers, token) {

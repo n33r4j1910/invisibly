@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Invisibly - Before We Start</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0b0e14; color: #e4e7ed; display: flex; justify-content: center; padding: 40px 20px; }
+        .card { background: #141a24; border-radius: 20px; padding: 32px; max-width: 720px; width: 100%; box-shadow: 0 20px 40px rgba(0,0,0,0.6); border: 1px solid #2a3344; }
+        h1 { font-size: 26px; font-weight: 600; display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+        .subtitle { color: #7b8aa3; font-size: 14px; margin-bottom: 24px; }
+        .summary { background: #1e2633; border-radius: 14px; padding: 20px 22px; border: 1px solid #2a3344; margin-bottom: 20px; }
+        .summary h2 { font-size: 15px; margin-bottom: 12px; color: #4cd9a0; }
+        .summary ul { padding-left: 20px; font-size: 14px; line-height: 1.7; color: #cfd6e3; }
+        details { background: #1e2633; border-radius: 14px; border: 1px solid #2a3344; margin-bottom: 12px; overflow: hidden; }
+        summary { padding: 14px 18px; cursor: pointer; font-size: 14px; font-weight: 500; color: #cfd6e3; }
+        summary:hover { background: #232c3b; }
+        .doc-body { padding: 4px 22px 20px; font-size: 13px; line-height: 1.7; color: #9aa7bd; white-space: pre-wrap; max-height: 320px; overflow-y: auto; border-top: 1px solid #2a3344; margin-top: 6px; padding-top: 16px; }
+        .accept-row { display: flex; align-items: flex-start; gap: 10px; margin: 24px 0 18px; font-size: 14px; color: #cfd6e3; line-height: 1.5; }
+        .accept-row input { margin-top: 3px; width: 18px; height: 18px; accent-color: #2a6bff; cursor: pointer; }
+        .accept-row label { cursor: pointer; }
+        .btn { background: #1e2633; border: 1px solid #2a3344; color: #e4e7ed; padding: 12px 26px; border-radius: 40px; font-size: 14px; font-weight: 600; cursor: pointer; transition: 0.15s; width: 100%; }
+        .btn.primary { background: #1a4bbf; border-color: #2a6bff; color: #fff; }
+        .btn.primary:hover:not(:disabled) { background: #2a6bff; }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .foot { color: #5c6a82; font-size: 12px; margin-top: 16px; text-align: center; }
+        .done { display: none; text-align: center; padding: 40px 0; }
+        .done.show { display: block; }
+        .form { }
+        .form.hide { display: none; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <div class="form" id="consent-form">
+        <h1>🛡️ Invisibly</h1>
+        <div class="subtitle">Before we start protecting this device, a quick, honest summary — then the full documents if you want them.</div>
+
+        <div class="summary">
+            <h2>✅ In plain terms</h2>
+            <ul>
+                <li>Invisibly does <strong>not</strong> collect, store, or transmit any personal data, telemetry, or usage statistics — everything runs and stays on this device.</li>
+                <li>It monitors local security signals (firewall, updates, network state, running processes) to detect drift and auto-repair what's safe to auto-repair.</li>
+                <li>All data is stored at <code>C:\ProgramData\Invisibly</code>, encrypted at rest (AES-256-GCM) and integrity-signed (HMAC-SHA256).</li>
+                <li>System logs are kept for 30 days and auto-rotated. Nothing is shared with third parties or sent outside this device.</li>
+                <li>You can withdraw consent at any time from the dashboard's <strong>Disable</strong> button, or by uninstalling the app.</li>
+            </ul>
+        </div>
+
+        <details>
+            <summary>📄 Read the full Privacy Policy</summary>
+            <div class="doc-body">__PRIVACY_POLICY_TEXT__</div>
+        </details>
+
+        <details>
+            <summary>📄 Read the full Terms of Use (EULA)</summary>
+            <div class="doc-body">__LICENSE_TEXT__</div>
+        </details>
+
+        <div class="accept-row">
+            <input type="checkbox" id="agree-check" />
+            <label for="agree-check">I have read and agree to the Privacy Policy and Terms of Use above.</label>
+        </div>
+
+        <button class="btn primary" id="agree-btn" disabled>Agree &amp; Start Protecting This Device</button>
+        <div class="foot" id="err-msg"></div>
+    </div>
+
+    <div class="done" id="done-screen">
+        <h1 style="justify-content:center;">✅ Thanks</h1>
+        <p style="color:#7b8aa3; margin-top:10px;">Invisibly is starting up now. You can close this tab — the tray icon will turn green once the first check completes.</p>
+    </div>
+</div>
+<script>
+    const check = document.getElementById('agree-check');
+    const btn = document.getElementById('agree-btn');
+    check.addEventListener('change', () => { btn.disabled = !check.checked; });
+
+    btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        btn.textContent = 'Starting...';
+        try {
+            const resp = await fetch('/accept_consent', { method: 'POST' });
+            if (!resp.ok) throw new Error('Request failed');
+            document.getElementById('consent-form').classList.add('hide');
+            document.getElementById('done-screen').classList.add('show');
+        } catch (e) {
+            document.getElementById('err-msg').textContent = 'Something went wrong - please try again.';
+            btn.disabled = false;
+            btn.textContent = 'Agree & Start Protecting This Device';
+        }
+    });
+</script>
+</body>
+</html>

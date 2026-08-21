@@ -148,11 +148,20 @@ impl Context {
                     1
                 }
             }
+            // FIX: is_home_network was computed but never actually checked here -
+            // the comment claimed "Public WiFi at home -> no deduction" but the
+            // code only ever looked at is_public_wifi, so a home network that
+            // Windows happens to categorize as Public (confirmed happening live
+            // on this session's own test machine) got the full multiplier with
+            // no way to be exempted, and the multiplier itself silently doubled
+            // the points beyond what the report displays as "weight".
             "wifi_profile" => {
-                if self.is_public_wifi {
-                    2 // Public WiFi on public network → low deduction
+                if self.is_home_network {
+                    0 // Your own network being mis-categorized isn't a threat
+                } else if self.is_public_wifi {
+                    2 // Genuinely on an untrusted network away from home
                 } else {
-                    0 // Public WiFi at home → no deduction
+                    1
                 }
             }
             _ => 1,

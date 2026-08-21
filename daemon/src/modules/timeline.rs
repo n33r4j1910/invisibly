@@ -248,6 +248,23 @@ pub fn init_timeline() -> bool {
 
 static NEXT_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+// FIX: this counter used to reset to 0 on every daemon restart with no
+// memory of what was already on disk. verify_chain() requires each entry's
+// monotonic_counter to be strictly increasing across the WHOLE persisted
+// file, so the first entry written after any restart (counter=1) was
+// always <= whatever the previous session left off at, permanently
+// breaking the chain from that point on and triggering a false
+// "possible tampering" + 30-point trust deduction on every restart that
+// then logged anything. Must be called once at startup, before any new
+// entry is written.
+pub fn init_counter() {
+    let max_existing = read_entries_from_disk().iter()
+        .map(|e| e.monotonic_counter)
+        .max()
+        .unwrap_or(0);
+    NEXT_COUNTER.store(max_existing, std::sync::atomic::Ordering::SeqCst);
+}
+
 fn get_next_counter() -> u64 {
     NEXT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
 }
