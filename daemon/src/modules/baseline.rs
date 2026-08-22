@@ -175,6 +175,32 @@ pub fn get_versions() -> Vec<BaselineVersion> {
     versions
 }
 
+// NEW: Prune old baseline versions to prevent unbounded growth of the
+// baselines/ folder. A new version is written to disk on every baseline
+// sync (auto-repair, drift confirmation, etc.), with nothing ever deleting
+// old ones - unlike timeline.jsonl this had no cap at all. restore_version()
+// only ever needs a *recent* known-good snapshot in practice, so keeping the
+// newest MAX_VERSIONS and dropping the rest preserves that feature while
+// bounding disk use. Version numbering/hash-chaining for future baselines
+// only ever reads the live baseline.signed + current_version.txt (see
+// get_next_version/get_previous_hash), not these archived files, so pruning
+// them can't corrupt a future baseline.
+const MAX_VERSIONS: usize = 200;
+
+pub fn prune_old_versions() {
+    let mut versions = get_versions();
+    if versions.len() <= MAX_VERSIONS {
+        return;
+    }
+    versions.sort_by_key(|v| v.version);
+    let to_remove = versions.len() - MAX_VERSIONS;
+    println!("🔄 Pruning baseline history: removing {} old version(s), keeping last {}", to_remove, MAX_VERSIONS);
+    for v in &versions[..to_remove] {
+        let _ = fs::remove_file(format!("{}{}.json", VERSIONS_DIR, v.version));
+        let _ = fs::remove_file(format!("{}{}.signed", VERSIONS_DIR, v.version));
+    }
+}
+
 pub fn restore_version(version: u64) -> Result<(), String> {
     let versions = get_versions();
     let target = versions.iter().find(|v| v.version == version);

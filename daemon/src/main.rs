@@ -235,6 +235,9 @@ fn auto_fix_startup_issues() {
 
     // 3. Prune timeline to prevent unbounded growth
     timeline::prune_old_entries();
+    baseline::prune_old_versions();
+    repair::rotate_repair_log_if_large();
+    repair::prune_old_incidents();
 }
 
 // ============================================
@@ -695,6 +698,9 @@ fn run_daemon() {
             if today != last_pruned_date && now.hour() == 23 && now.minute() >= 59 {
                 println!("🔄 Nightly cache prune (23:59) triggered");
                 timeline::prune_old_entries();
+                baseline::prune_old_versions();
+                repair::rotate_repair_log_if_large();
+                repair::prune_old_incidents();
                 last_pruned_date = today;
             }
         }

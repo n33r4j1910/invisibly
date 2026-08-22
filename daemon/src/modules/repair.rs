@@ -105,6 +105,48 @@ fn log_incident(category: &str, action: &str, details: &str) {
     let _ = fs::write(&filename, content);
 }
 
+// NEW: Both repair.log and the incidents/ folder were append-only with no
+// cap - repair.log alone reached 7MB+ and incidents/ (one .txt file per
+// repair action, written directly into the user's profile folder) reached
+// 9000+ files, entirely from routine operation with no cleanup ever. Same
+// bounded-retention pattern as timeline::prune_old_entries /
+// baseline::prune_old_versions, run on the same nightly cycle.
+const MAX_REPAIR_LOG_BYTES: u64 = 5 * 1024 * 1024;
+const MAX_INCIDENT_FILES: usize = 500;
+
+pub fn rotate_repair_log_if_large() {
+    let log_path = format!("{}\\repair.log", DATA_DIR);
+    let Ok(meta) = fs::metadata(&log_path) else { return; };
+    if meta.len() <= MAX_REPAIR_LOG_BYTES { return; }
+
+    let old_path = format!("{}\\repair.log.old", DATA_DIR);
+    let _ = fs::remove_file(&old_path);
+    if fs::rename(&log_path, &old_path).is_ok() {
+        println!("🔄 Rotated repair.log (exceeded {} bytes)", MAX_REPAIR_LOG_BYTES);
+    }
+}
+
+pub fn prune_old_incidents() {
+    let user_dir = format!("{}\\Invisibly\\incidents", std::env::var("USERPROFILE").unwrap_or_default());
+    let dir = Path::new(&user_dir);
+    if !dir.exists() { return; }
+
+    let mut files: Vec<_> = match fs::read_dir(dir) {
+        Ok(entries) => entries.flatten().map(|e| e.path()).filter(|p| p.is_file()).collect(),
+        Err(_) => return,
+    };
+    if files.len() <= MAX_INCIDENT_FILES { return; }
+
+    // Filenames are "{YYYY-MM-DD_HH-MM-SS}_{category}_{action}.txt", which
+    // sorts lexicographically in chronological order - oldest first.
+    files.sort();
+    let to_remove = files.len() - MAX_INCIDENT_FILES;
+    println!("🔄 Pruning incident reports: removing {} old file(s), keeping last {}", to_remove, MAX_INCIDENT_FILES);
+    for f in &files[..to_remove] {
+        let _ = fs::remove_file(f);
+    }
+}
+
 // ============================================
 // FIX #9: Create hosts backup
 // ============================================

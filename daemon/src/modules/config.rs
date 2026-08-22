@@ -124,7 +124,7 @@ pub fn ensure_data_dir() -> std::io::Result<()> {
 }
 
 // FIX #13: Log ACL failures to file
-fn log_acl_failure(msg: &str) {
+pub fn log_acl_failure(msg: &str) {
     let log_path = format!("{}\\acl_hardening.log", DATA_DIR);
     let entry = format!(
         "{}|ACL_FAILURE|{}\n",

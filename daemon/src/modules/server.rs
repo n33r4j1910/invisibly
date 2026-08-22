@@ -221,6 +221,56 @@ fn get_token() -> String {
     new_token
 }
 
+// NEW: config::ensure_data_dir() deliberately grants the plain logged-in
+// user FullControl across all of C:\ProgramData\Invisibly (recursively),
+// so the daemon can still read its own files if it's ever running
+// unelevated - that grant meant any *other* local process running as the
+// same user (e.g. malware, the exact threat model this product exists to
+// catch) could read+decrypt agent.token straight off disk, bypassing the
+// /token HTTP gate entirely. agent.token specifically doesn't need that
+// grant: the daemon's normal, steady-state deployment is elevated (the
+// Scheduled Task runs at Highest), and get_token()'s existing fallback
+// (regenerate an in-memory token, `let _ = fs::write(...)` tolerating a
+// failed persist) already degrades gracefully if a rare unelevated run
+// can't read/write it - so this can be locked to Administrators/SYSTEM
+// only without breaking that fallback path. Re-applied on every call
+// (single call, at server startup) so it can't be silently re-widened by
+// a later ensure_data_dir() pass.
+fn restrict_token_file_acl(path: &str) {
+    // ensure_data_dir() grants this as an explicit (non-inherited) ACE, so
+    // /inheritance:r alone won't strip it - it has to be removed by name.
+    let username = std::env::var("USERNAME").unwrap_or_default();
+    let mut args: Vec<String> = vec![
+        path.to_string(),
+        "/inheritance:r".to_string(),
+        "/grant:r".to_string(), "SYSTEM:F".to_string(),
+        "/grant:r".to_string(), "Administrators:F".to_string(),
+        "/remove".to_string(), "Users".to_string(),
+        "/remove".to_string(), "Everyone".to_string(),
+    ];
+    if !username.is_empty() {
+        args.push("/remove".to_string());
+        args.push(username);
+    }
+
+    let result = std::process::Command::new("icacls")
+        .args(&args)
+        .creation_flags(CREATE_NO_WINDOW)
+        .status();
+
+    match result {
+        Ok(status) if status.success() => {}
+        Ok(status) => {
+            crate::modules::config::log_acl_failure(&format!(
+                "agent.token ACL restriction failed with exit code: {}", status.code().unwrap_or(-1)
+            ));
+        }
+        Err(e) => {
+            crate::modules::config::log_acl_failure(&format!("Failed to run icacls on agent.token: {}", e));
+        }
+    }
+}
+
 // ============================================
 // CORS
 // ============================================
@@ -395,6 +445,7 @@ pub fn run() -> std::io::Result<()> {
 
     let token = get_token();
     println!("🔑 Auth token: {}", token);
+    restrict_token_file_acl(&format!("{}\\agent.token", DATA_DIR));
 
     let dashboard_html = include_str!("../web/dashboard.html");
     let consent_html = build_consent_html();
@@ -458,6 +509,63 @@ fn validate_auth(headers: &str, token: &str) -> bool {
     lower_headers.contains(&lower_bearer) || lower_headers.contains(&lower_token)
 }
 
+// NEW: GET /token used to hand the real bearer token to any local caller
+// with zero credentials - the Authorization check on every other endpoint
+// was then trivially bypassable by any other process on the machine (the
+// exact "malware already running locally" threat model this product exists
+// to catch) just by calling /token first. Since the dashboard is loaded
+// straight in a browser with no pre-shared secret, and the tray fetches its
+// own token the same way over HTTP, app-layer credentials alone can't
+// distinguish "the real dashboard/tray" from "any other local process" -
+// the one thing that can is *which OS process* is on the other end of the
+// loopback connection. Resolve the caller's PID from the connection's
+// remote port and only hand out the token to our own tray.exe or a real
+// browser (what the dashboard is meant to be opened in). Anything else -
+// a bare script, curl, PowerShell, malware - gets refused. Not perfect
+// (a fully privileged/renamed attacker could still spoof this), but it
+// closes the zero-effort "just curl /token" path.
+fn caller_process_path(peer_port: u16) -> Option<String> {
+    let script = format!(
+        "$c = Get-NetTCPConnection -LocalPort {} -RemotePort {} -State Established -ErrorAction SilentlyContinue | Select-Object -First 1; if ($c) {{ (Get-Process -Id $c.OwningProcess -ErrorAction SilentlyContinue).Path }}",
+        PORT, peer_port
+    );
+    let out = std::process::Command::new("powershell").creation_flags(CREATE_NO_WINDOW)
+        .args(["-NoProfile", "-Command", &script])
+        .output().ok()?;
+    let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if path.is_empty() { None } else { Some(path) }
+}
+
+fn is_trusted_token_caller(peer_addr: Option<std::net::SocketAddr>) -> bool {
+    // Browsers can legitimately live in many install locations, so they're
+    // matched by filename only - a weaker check, but browsers aren't what
+    // malware typically renames itself to. Our OWN tray binary, on the
+    // other hand, always ships as invisibly-tray.exe right next to
+    // invisibly-daemon.exe, so it's matched by exact full path - filename-
+    // only would let anything renamed "invisibly-tray.exe" from any folder
+    // pass as trusted, which defeats the point of this check.
+    const TRUSTED_BROWSER_SUFFIXES: [&str; 6] = [
+        "\\chrome.exe", "\\msedge.exe", "\\firefox.exe",
+        "\\brave.exe", "\\opera.exe", "\\iexplore.exe",
+    ];
+    let Some(addr) = peer_addr else { return false; };
+    let Some(path) = caller_process_path(addr.port()) else { return false; };
+    let lower = path.to_lowercase();
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let expected_tray = dir.join("invisibly-tray.exe");
+            if let Some(expected) = expected_tray.to_str() {
+                if lower == expected.to_lowercase() {
+                    return true;
+                }
+            }
+        }
+    }
+
+    TRUSTED_BROWSER_SUFFIXES.iter().any(|s| lower.ends_with(s))
+}
+
 // ============================================
 // CONNECTION HANDLER
 // ============================================
@@ -495,7 +603,11 @@ fn handle_connection(mut stream: TcpStream, token: &str, dashboard_html: &str, c
             // GET ENDPOINTS
             // ============================================
             ("GET", "/token") => {
-                json_response(200, &format!(r#"{{"token":"{}"}}"#, token))
+                if is_trusted_token_caller(stream.peer_addr().ok()) {
+                    json_response(200, &format!(r#"{{"token":"{}"}}"#, token))
+                } else {
+                    unauthorized()
+                }
             }
             ("GET", "/") => {
                 let trust_state = get_trust_state();

@@ -149,13 +149,30 @@ pub fn get_hosts_hash() -> String {
     }
 }
 
+// FIX: 224.0.0.0-239.255.255.255 (multicast) and 255.255.255.255 (broadcast)
+// are OS-injected protocol group addresses (SSDP/mDNS/LLMNR/IGMP/etc.), not
+// devices. Windows re-adds/re-learns these on its own schedule independent
+// of any real network activity, which was making "new ARP entry" fire as a
+// false "possible new device" alert every couple of minutes. A changed MAC
+// for a real (non-multicast) IP - actual spoofing - is unaffected by this.
+fn is_multicast_or_broadcast_arp_line(line: &str) -> bool {
+    if line == "255.255.255.255" { return true; }
+    if let Some(first_octet) = line.split('.').next().and_then(|o| o.parse::<u8>().ok()) {
+        return (224..=239).contains(&first_octet);
+    }
+    false
+}
+
 pub fn get_arp() -> Vec<String> {
     let mut a = Vec::new();
     if let Ok(o) = Command::new("arp").creation_flags(CREATE_NO_WINDOW).args(["-a"]).output() {
         for l in String::from_utf8_lossy(&o.stdout).lines() {
             // FIX #15: Broader pattern matching for non-English Windows
             if l.contains("dynamic") || l.contains("static") || l.contains("dynamique") || l.contains("statique") || l.contains("dinámico") || l.contains("estático") {
-                a.push(l.trim().to_string());
+                let trimmed = l.trim().to_string();
+                let ip = trimmed.split_whitespace().next().unwrap_or("");
+                if is_multicast_or_broadcast_arp_line(ip) { continue; }
+                a.push(trimmed);
             }
         }
     }

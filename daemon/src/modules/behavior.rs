@@ -387,7 +387,15 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
     // ============================================
     // NEW: BITLOCKER
     // ============================================
-    if baseline.bitlocker_status != current.bitlocker_status {
+    // FIX: on Windows editions/configs where the BitLocker WMI query can't
+    // run (e.g. Windows Home, no TPM) detection fails every single cycle,
+    // so baseline (captured once, real or error) never matches this
+    // permanently-failing current reading - that was firing a false
+    // "alert" every ~30s forever. A detection failure isn't itself a
+    // security finding; only alert on an actual status change once
+    // detection is able to read a real value again.
+    if baseline.bitlocker_status != current.bitlocker_status
+        && current.bitlocker_status != "ERROR_BITLOCKER_DETECTION_FAILED" {
         changes.push((
             "bitlocker".to_string(),
             current.bitlocker_status.clone(), // Pass raw value

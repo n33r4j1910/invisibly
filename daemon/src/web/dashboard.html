@@ -625,9 +625,14 @@ async function loadWatchedFolders() {
         const data = await apiFetch('/watched-folders');
         const el = document.getElementById('watched-folders-list');
         if (data.folders && data.folders.length) {
-            el.innerHTML = data.folders.map(f =>
-                `<div title="${folderReason(f)}" style="cursor:help;">📁 ${f}</div>`
-            ).join('');
+            el.innerHTML = '';
+            data.folders.forEach(f => {
+                const div = document.createElement('div');
+                div.title = folderReason(f);
+                div.style.cursor = 'help';
+                div.textContent = `📁 ${f}`;
+                el.appendChild(div);
+            });
         } else {
             el.textContent = 'None configured';
         }
