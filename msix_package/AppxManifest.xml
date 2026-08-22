@@ -7,7 +7,7 @@
          xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
          IgnorableNamespaces="uap mp rescap desktop6 uap5">
   
-  <Identity Name="NeerajRathod.Invisibly" Publisher="CN=7CC68D44-A8B5-420C-8A13-CEF4F4B26EDB" Version="2.0.1.0" />
+  <Identity Name="NeerajRathod.Invisibly" Publisher="CN=7CC68D44-A8B5-420C-8A13-CEF4F4B26EDB" Version="2.0.2.0" />
   
   <Properties>
     <DisplayName>Invisibly</DisplayName>

@@ -292,11 +292,27 @@ fn cors_headers() -> String {
 // HTTP HELPERS
 // ============================================
 
+// NEW: ZAP flagged /dashboard as missing clickjacking protection and a CSP -
+// a malicious page a user has open in another tab could iframe the dashboard
+// and trick them into clicking a real control underneath a fake overlay.
+// frame-ancestors 'none' (+ X-Frame-Options for older browsers) closes that.
+// 'unsafe-inline' is needed for script-src/style-src since dashboard.html's
+// JS and some styling are inline, not external files - a real limitation,
+// not a full CSP, but still blocks loading any attacker-controlled remote
+// script/resource, which is the bigger win here. nosniff also closes the
+// X-Content-Type-Options findings.
+fn security_headers() -> &'static str {
+    "X-Frame-Options: DENY\r\n\
+     Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'\r\n\
+     X-Content-Type-Options: nosniff\r\n"
+}
+
 fn json_response(status: u16, body: &str) -> String {
     format!(
-        "HTTP/1.1 {}\r\n{}Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+        "HTTP/1.1 {}\r\n{}{}Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
         status_string(status),
         cors_headers(),
+        security_headers(),
         body.len(),
         body
     )
@@ -316,8 +332,9 @@ fn status_string(code: u16) -> &'static str {
 
 fn html_response(body: &str) -> String {
     format!(
-        "HTTP/1.1 200 OK\r\n{}Content-Type: text/html\r\nCache-Control: no-cache, no-store, must-revalidate\r\nPragma: no-cache\r\nExpires: 0\r\nContent-Length: {}\r\n\r\n{}",
+        "HTTP/1.1 200 OK\r\n{}{}Content-Type: text/html\r\nCache-Control: no-cache, no-store, must-revalidate\r\nPragma: no-cache\r\nExpires: 0\r\nContent-Length: {}\r\n\r\n{}",
         cors_headers(),
+        security_headers(),
         body.len(),
         body
     )
