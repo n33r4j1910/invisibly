@@ -286,15 +286,32 @@ fn start_tray_if_not_running() {
 /// categories with no real revert capability (tasks/services/wifi), which
 /// accept the current state as the new normal instead of pretending a
 /// change was reverted when it wasn't.
+// NEW: "automatic" repairs used to only ever write to repair.log and the
+// per-incident .txt files - never to the timeline the dashboard actually
+// shows. A real attack (proxy hijack tested live) got detected and fixed
+// correctly, but the dashboard's Security Timeline showed nothing at all -
+// same silent gap applied to every skip case too (unelevated, or a real
+// problem left unfixed behind a Pro paywall), which is arguably worse since
+// the user has no way to know they're currently unprotected. This enum lets
+// the caller log the real outcome without adding noise for the baseline-
+// hygiene categories (tasks/services/wifi), which are deliberately excluded
+// from nagging on ordinary drift - see the comment below.
+enum AutoRepairOutcome {
+    Applied(bool),
+    Hygiene,
+    SkippedNotElevated,
+    SkippedLicense,
+}
+
 fn apply_automatic_repair(
     category: &str,
     baseline: &mut detect::SystemState,
     current: &detect::SystemState,
     is_elevated_now: bool,
-) -> (bool, bool) {
+) -> (AutoRepairOutcome, bool) {
     if !is_elevated_now {
         println!("⚠️ Skipping {} repair - not elevated", category);
-        return (true, false);
+        return (AutoRepairOutcome::SkippedNotElevated, false);
     }
     // FIX: tasks/services/wifi are baseline-hygiene syncs, not security
     // fixes - they exist purely to stop re-flagging normal drift (a
@@ -306,7 +323,7 @@ fn apply_automatic_repair(
     let is_baseline_hygiene = matches!(category, "tasks" | "services" | "wifi");
     if !is_baseline_hygiene && !license::is_pro_licensed() {
         println!("🔒 Skipping {} repair - Pro subscription required (detected, not auto-fixed)", category);
-        return (true, false);
+        return (AutoRepairOutcome::SkippedLicense, false);
     }
     let success = match category {
         "hosts" => repair::restore_hosts(),
@@ -350,7 +367,8 @@ fn apply_automatic_repair(
         println!("❌ Auto-repair failed for: {}", category);
     }
     let synced = matches!(category, "tasks" | "services" | "wifi");
-    (success, synced)
+    let outcome = if is_baseline_hygiene { AutoRepairOutcome::Hygiene } else { AutoRepairOutcome::Applied(success) };
+    (outcome, synced)
 }
 
 // ============================================
@@ -514,6 +532,22 @@ fn run_daemon() {
         eprintln!("Failed to create data dir: {}", e);
         std::process::exit(1);
     }
+
+    // NEW: create_hosts_backup() was only ever called lazily, from inside
+    // restore_hosts() itself - the first time hosts-file drift was ever
+    // detected. That meant the "backup" it created was a snapshot of
+    // whatever the hosts file looked like AT THAT MOMENT, which could
+    // already be the tampered state the alert just fired for. "Restoring"
+    // from that backup was then a no-op that copied the poisoned file onto
+    // itself while still reporting Success - confirmed live: a hosts-file
+    // tampering test showed "repaired automatically" in the timeline while
+    // the malicious line was still sitting in the real file. Creating the
+    // backup here, at startup before any drift has been detected this
+    // session, means restore_hosts() has an actually-clean snapshot to
+    // fall back to for the common case. Known remaining gap, unchanged:
+    // a machine already compromised before Invisibly's very first-ever run
+    // still isn't covered - see ideal_reference()'s doc comment.
+    repair::create_hosts_backup();
 
     // FIX: server::set_ghost_active() was only ever updated by an explicit
     // toggle (auto on/off in the monitoring loop, or the /ghost /unghost API)
@@ -809,9 +843,43 @@ fn run_daemon() {
             for (category, details, action_type) in &issues {
                 match action_type.as_str() {
                     "automatic" => {
-                        let (_success, synced) = apply_automatic_repair(category, &mut baseline, &current, is_elevated_now);
+                        let (outcome, synced) = apply_automatic_repair(category, &mut baseline, &current, is_elevated_now);
                         if synced {
                             baseline_synced = true;
+                        }
+                        match outcome {
+                            AutoRepairOutcome::Applied(success) => {
+                                let _ = timeline::add_entry(
+                                    category,
+                                    "automatic",
+                                    details,
+                                    if success { "repaired automatically" } else { "repair failed - see repair.log" },
+                                    if success { timeline::RepairResult::Success } else { timeline::RepairResult::Failed }
+                                );
+                            }
+                            AutoRepairOutcome::SkippedNotElevated => {
+                                let _ = timeline::add_entry(
+                                    category,
+                                    "automatic",
+                                    details,
+                                    "detected but not repaired - daemon is not running elevated",
+                                    timeline::RepairResult::Skipped
+                                );
+                            }
+                            AutoRepairOutcome::SkippedLicense => {
+                                let _ = timeline::add_entry(
+                                    category,
+                                    "automatic",
+                                    details,
+                                    "detected but not repaired - Pro subscription required",
+                                    timeline::RepairResult::Skipped
+                                );
+                            }
+                            // Baseline-hygiene syncs (tasks/services/wifi) aren't a
+                            // security event - logging every routine drift here
+                            // would reintroduce the exact nagging this codebase
+                            // already deliberately avoids elsewhere.
+                            AutoRepairOutcome::Hygiene => {}
                         }
                     }
                     "confirm" => {
