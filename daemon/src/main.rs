@@ -48,6 +48,31 @@ pub static BASELINE: once_cell::sync::Lazy<Mutex<Option<detect::SystemState>>> =
 static TRUST_PENALIZED: once_cell::sync::Lazy<Mutex<std::collections::HashSet<String>>> =
     once_cell::sync::Lazy::new(|| Mutex::new(std::collections::HashSet::new()));
 
+// NEW: confirm/alert/manual-tier categories have no repair action to sync
+// baseline against (that's the whole point of those tiers), so without this
+// they re-log an identical timeline entry every ~30s cycle for as long as
+// the same unresolved condition persists - confirmed live for both the
+// root_ca alert just wired in and, separately, confirm-tier categories
+// were *also* being logged twice per cycle already (once as
+// "pending_approval" from the first issues-handling loop, once again as
+// "confirm" from the second) since neither call site was ever deduplicated
+// against the other. Keyed on (category, details) rather than just
+// category, unlike TRUST_PENALIZED above, so a *genuinely new* occurrence
+// (a third new root CA, a different DNS server) still logs immediately -
+// only an identical repeat of something already-logged gets suppressed.
+static LAST_LOGGED_DETAILS: once_cell::sync::Lazy<Mutex<std::collections::HashMap<String, String>>> =
+    once_cell::sync::Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
+
+fn should_log_timeline_entry(category: &str, details: &str) -> bool {
+    let mut map = LAST_LOGGED_DETAILS.lock().unwrap();
+    if map.get(category).map(|d| d.as_str()) == Some(details) {
+        false
+    } else {
+        map.insert(category.to_string(), details.to_string());
+        true
+    }
+}
+
 fn reload_baseline() -> Option<detect::SystemState> {
     let status = baseline::verify_baseline();
     if status.exists && status.valid {
@@ -296,6 +321,38 @@ fn start_tray_if_not_running() {
 // the caller log the real outcome without adding noise for the baseline-
 // hygiene categories (tasks/services/wifi), which are deliberately excluded
 // from nagging on ordinary drift - see the comment below.
+// NEW: after a category's automatic repair genuinely succeeds, its baseline
+// field needs to move to the real post-repair value - NOT to `current`
+// (that's the tampered pre-repair snapshot that triggered the alert in the
+// first place; syncing to it would just accept the attacker's change) and
+// not left untouched either (that's what caused the repeat-alert bug this
+// function fixes). Only categories with a single well-defined comparison
+// field are handled here; anything not listed falls through to `false`
+// (left for the existing baseline_synced/hygiene path, or simply not yet
+// covered - safe by construction, since detect_all_changes will just keep
+// flagging it honestly rather than silently going stale).
+fn sync_repaired_field(category: &str, baseline: &mut detect::SystemState, current: &detect::SystemState) -> bool {
+    match category {
+        "hosts" => { baseline.hosts_hash = current.hosts_hash.clone(); true }
+        "proxy" => { baseline.proxy_settings = current.proxy_settings.clone(); true }
+        "defender" => { baseline.defender_status = current.defender_status.clone(); true }
+        "uac" => { baseline.uac_status = current.uac_status.clone(); true }
+        "wu" => { baseline.windows_update_status = current.windows_update_status.clone(); true }
+        "sr" => { baseline.system_restore_status = current.system_restore_status.clone(); true }
+        "smartscreen" => { baseline.smart_screen_status = current.smart_screen_status.clone(); true }
+        "ipv6" => { baseline.ipv6_status = current.ipv6_status.clone(); true }
+        "wifi_profile" => { baseline.wifi_profile_status = current.wifi_profile_status.clone(); true }
+        "trojan_source" => { baseline.unicode_bidi_files = current.unicode_bidi_files.clone(); true }
+        "rdp" => { baseline.rdp_status = current.rdp_status.clone(); true }
+        "fakeext" => { baseline.fake_extensions = current.fake_extensions.clone(); true }
+        "bt" => { baseline.bt_devices = current.bt_devices.clone(); true }
+        "hid" => { baseline.hid_devices = current.hid_devices.clone(); true }
+        "bruteforce" => { baseline.login_failures = current.login_failures.clone(); true }
+        "adapter" => { baseline.network_adapters = current.network_adapters.clone(); true }
+        _ => false,
+    }
+}
+
 enum AutoRepairOutcome {
     Applied(bool),
     Hygiene,
@@ -839,6 +896,9 @@ fn run_daemon() {
         if !issues.is_empty() {
             println!("⚠️ Found {} changes!", issues.len());
             let mut baseline_synced = false;
+            // NEW: categories that genuinely repaired successfully this cycle -
+            // see sync_repaired_field() below for why this exists.
+            let mut repaired_categories: Vec<String> = Vec::new();
 
             for (category, details, action_type) in &issues {
                 match action_type.as_str() {
@@ -849,6 +909,9 @@ fn run_daemon() {
                         }
                         match outcome {
                             AutoRepairOutcome::Applied(success) => {
+                                if success {
+                                    repaired_categories.push(category.clone());
+                                }
                                 let _ = timeline::add_entry(
                                     category,
                                     "automatic",
@@ -884,13 +947,15 @@ fn run_daemon() {
                     }
                     "confirm" => {
                         println!("⏳ Confirm required for: {} - {}", category, details);
-                        let _ = timeline::add_entry(
-                            category,
-                            "pending_approval",
-                            details,
-                            "awaiting user confirmation",
-                            timeline::RepairResult::AwaitingApproval
-                        );
+                        if should_log_timeline_entry(category, details) {
+                            let _ = timeline::add_entry(
+                                category,
+                                "pending_approval",
+                                details,
+                                "awaiting user confirmation",
+                                timeline::RepairResult::AwaitingApproval
+                            );
+                        }
                     }
                     "alert" => {
                         println!("🔔 Alert: {} - {}", category, details);
@@ -904,13 +969,35 @@ fn run_daemon() {
                 }
             }
 
-            if baseline_synced {
+            let current_after_repair = detect::collect_state();
+
+            // NEW: a successful automatic repair used to only get accepted
+            // into the baseline if EVERY issue this cycle resolved (the
+            // is_empty() check below), all-or-nothing. One unrelated
+            // lingering confirm-tier item (DNS/startup awaiting approval,
+            // by design meant to just sit there) blocked baseline sync for
+            // every OTHER category too - so an already-fixed hosts/fakeext/
+            // etc. got re-detected as "changed" and re-"repaired" (a no-op)
+            // every single cycle forever, spamming false Success entries.
+            // Confirmed live: hosts and fakeext both repeated 3-4 times in
+            // a row while a DNS confirm-item sat unapproved. Sync each
+            // successfully-repaired category's own field the moment it's
+            // fixed, independent of what else is still pending - a
+            // still-pending confirm-tier category is simply not in
+            // repaired_categories, so its field is left untouched and still
+            // requires real user approval, same as before.
+            let mut baseline_updated = baseline_synced;
+            for cat in &repaired_categories {
+                if sync_repaired_field(cat, &mut baseline, &current_after_repair) {
+                    baseline_updated = true;
+                }
+            }
+            if baseline_updated {
                 let _ = baseline::create_baseline(&baseline);
                 let mut guard = BASELINE.lock().unwrap();
                 *guard = Some(baseline.clone());
             }
 
-            let current_after_repair = detect::collect_state();
             let issues_after = behavior::detect_all_changes(&baseline, &current_after_repair);
 
             if issues_after.is_empty() {
@@ -971,7 +1058,17 @@ fn run_daemon() {
             // Categories that resolved stop being tracked, so they're
             // treated as fresh (and re-deducted once) if they recur later.
             penalized.retain(|c| current_categories.contains(c));
-            penalized.extend(current_categories);
+            penalized.extend(current_categories.clone());
+
+            // NEW: same "resolved -> forget it, so a later recurrence logs
+            // fresh" logic for the timeline dedup above - without this, a
+            // confirm-tier category that gets approved and later recurs
+            // with the *exact same* before/after text (e.g. DNS flapping
+            // between the same two values) would be wrongly suppressed as
+            // "already logged" forever, since the old (category, details)
+            // pair never leaves the map.
+            let mut last_logged = LAST_LOGGED_DETAILS.lock().unwrap();
+            last_logged.retain(|cat, _| current_categories.contains(cat));
 
             if !newly_penalized {
                 trust::recover_trust(2);
@@ -982,13 +1079,15 @@ fn run_daemon() {
 
         for (category, details, action_type) in &issues {
             if action_type == "confirm" || action_type == "alert" || action_type == "manual" {
-                let _ = timeline::add_entry(
-                    category,
-                    action_type,
-                    details,
-                    "detected",
-                    timeline::RepairResult::AwaitingApproval
-                );
+                if should_log_timeline_entry(category, details) {
+                    let _ = timeline::add_entry(
+                        category,
+                        action_type,
+                        details,
+                        "detected",
+                        timeline::RepairResult::AwaitingApproval
+                    );
+                }
             }
         }
 

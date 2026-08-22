@@ -285,6 +285,25 @@ pub fn detect_all_changes(baseline: &SystemState, current: &SystemState) -> Vec<
         ));
     }
 
+    // NEW: get_root_cas() collected this data from the start, but nothing
+    // ever compared it - installing a malicious root CA (enables silent
+    // HTTPS interception on everything) went completely unmonitored.
+    // Alert-only, not automatic: a legitimate corporate proxy, VPN client,
+    // or dev tool (mkcert, Fiddler, etc.) installing its own trusted CA is
+    // a normal, intentional event - auto-removing it would break whatever
+    // the user/IT installed it for. Only flag genuinely NEW entries, same
+    // reasoning as the ARP fix - a CA disappearing isn't itself suspicious.
+    let new_root_cas: Vec<&String> = current.root_cas.iter()
+        .filter(|c| !baseline.root_cas.contains(c))
+        .collect();
+    if !new_root_cas.is_empty() {
+        changes.push((
+            "root_ca".to_string(),
+            format!("New trusted root certificate(s) installed: {:?}", new_root_cas),
+            "alert".to_string()
+        ));
+    }
+
     // ============================================
     // PROCESS CHANGES
     // ============================================
