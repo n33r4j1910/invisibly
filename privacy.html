@@ -1,7 +1,7 @@
 Privacy Policy for Invisibly
 
 Effective Date: August 11, 2026
-Last Updated: August 11, 2026
+Last Updated: November 14, 2026
 
 1. Introduction
 
@@ -17,7 +17,17 @@ Email: supportatdeltaiqx@gmail.com
 
 3.1 Types of Personal Data Collected
 
-Invisibly does NOT collect, store, or transmit any personal data, telemetry, or usage statistics.
+Invisibly is built to protect your PC without ever learning anything about you.
+
+Offline by design: all of Invisibly's protection runs on your own computer. It does not need an internet connection to watch your security settings, spot tampering, repair problems or stop ransomware and hidden crypto-miners. It has no account, no sign-in and no cloud service.
+
+The only time Invisibly goes online is an optional once-a-day download of security-list updates (newly found bad programs and websites). This is a one-way download: it fetches a signed list and sends nothing about you or your PC. You can turn it off in Advanced &gt; Protections and everything else keeps working. Updates and Pro subscription status are handled by the Microsoft Store.
+
+Two optional online features, and who sees what: (1) the once-a-day security-list download is fetched from GitHub, which can see your internet address, as with any download; (2) Safe Browsing, only if you switch it on, sends the website names you look up to Quad9 (a public DNS service) instead of your usual provider, so Quad9 sees those names. Invisibly sends nothing else to anyone. App updates and Pro subscription status are handled by the Microsoft Store, whose own policy applies.
+
+To spot risky browser extensions and hijacked browser settings, Invisibly reads your browser's settings and extension list files (Chrome, Edge, Brave) on your device. It does not read your history, passwords, cookies or page content, and nothing leaves your PC.
+
+What Invisibly never captures: your name, email address, phone number, location, passwords, browsing history, documents or the contents of your files. It also collects no device identifiers, advertising IDs, telemetry, crash reports or usage statistics, and it contains no analytics, tracking or advertising code. The security checks it makes (settings, startup items, network configuration, connected devices and similar) are read on your device, judged on your device and stay on your device.
 
 3.2 Processing Activities
 
@@ -25,12 +35,13 @@ All operations run locally on the user's device. The Software processes the foll
 
 | Data Category | Purpose of Processing | Retention Period |
 |---------------|----------------------|------------------|
-| System Configuration Data | Baseline security monitoring and auto-repair | Until user deletes the software or withdraws consent |
-| System Logs | Incident detection and reporting | 30 days (logs are automatically rotated) |
+| System Configuration Data (security settings such as firewall, DNS, startup items, scheduled tasks, certificates, connected devices and Wi-Fi network status) | Baseline security monitoring and auto-repair. Read and compared on your device only, never sent anywhere | Until user deletes the software or withdraws consent |
+| System Logs | Incident detection and reporting | Kept on your device only; the security timeline keeps your most recent 1,000 events and other logs are rotated by size |
+| Folder Activity (names of recently changed files and the first few bytes of a few of them, in Documents, Desktop, Pictures and Downloads; running program names) | Spot ransomware and hidden crypto-miners, and pause the program responsible. Judged on your device, never stored beyond the security timeline entry and never sent anywhere. Invisibly also keeps one hidden guard file in each of those folders (safe to delete if you uninstall) | Not retained |
 
 3.3 Consent
 
-The user's consent is obtained at the time of installation. The consent is:
+The user's consent is obtained on first launch, before any monitoring starts. The consent is:
 - Free, specific, informed, unconditional, and unambiguous
 - Provided through active opt-in (not pre-ticked)
 - Withdrawable at any time through the software's dashboard
@@ -39,7 +50,7 @@ The user's consent is obtained at the time of installation. The consent is:
 
 Users may withdraw consent by:
 - Uninstalling the Software
-- Or by disabling the Software using the "Disable Invisibly" button in the dashboard
+- Or by pausing the Software with the dashboard's "Pause for 1 hour" button (monitoring stops for an hour and then resumes by itself; to stop it for good, uninstall it). Stored data stays until you delete the folder above
 
 4. Data Storage and Security
 
@@ -50,22 +61,19 @@ All data is stored locally on the user's device at:
 
 4.2 Security Safeguards
 
-- AES-256-GCM encryption for baseline data
-- HMAC-SHA256 for tamper detection
-- TPM binding (optional, falls back to secure HMAC)
+- HMAC-SHA256 signatures for tamper detection
+- The saved baseline and the security timeline are encrypted (AES-256-GCM); the key is protected by Windows (DPAPI)
 - Windows ACL hardening on data folders
 
 4.3 Data Retention
 
 - System Configuration Data: Retained until user uninstalls
-- System Logs: Retained for 30 days
+- System Logs: Kept on your device only; the security timeline keeps the most recent 1,000 events, other logs are rotated by size
 - Consent Records: Retained as per DPDP Act requirements
 
 4.4 Data Deletion
 
-Data is automatically deleted when:
-- The user uninstalls the Software
-- The user withdraws consent through the dashboard
+Invisibly keeps its data in C:\ProgramData\Invisibly. Windows does not remove that folder when an app is uninstalled, so to erase everything Invisibly stored, delete that folder after uninstalling.
 
 5. Data Principal Rights
 
@@ -76,14 +84,14 @@ Users may request access to their personal data by contacting the Grievance Offi
 
 5.2 Right to Correction and Erasure
 Users may request correction or deletion of their personal data by:
-- Uninstalling the Software
+- Uninstalling the Software and deleting C:\ProgramData\Invisibly
 - Contacting the Grievance Officer
 
 5.3 Right to Grievance Redressal
 Users may lodge complaints with the Grievance Officer regarding any violation of their rights.
 
 5.4 Right to Withdraw Consent
-Users may withdraw consent at any time via the dashboard or by uninstalling the Software.
+Users may withdraw consent at any time by pausing the Software from the dashboard or by uninstalling it.
 
 5.5 Right to Nominate
 Users may nominate a person to exercise their rights on their behalf after death or incapacity.
@@ -92,11 +100,11 @@ Users may nominate a person to exercise their rights on their behalf after death
 
 6.1 Third-Party Sharing
 
-Invisibly does not share any personal data with third parties.
+Invisibly does not share any personal data with third parties. The two optional connections described in section 3.1 reach GitHub (security-list download) and, if you switch it on, Quad9 (Safe Browsing). Like any internet service they can see your internet address, and Quad9 sees the website names you look up. Invisibly sends them nothing else.
 
 6.2 Cross-Border Data Transfer
 
-No personal data is transferred outside India. All data remains on the user's device.
+Your files, settings and security data are never transferred anywhere and remain on the user's device. The only exceptions are the optional connections described in section 3.1.
 
 6.3 Data Processors
 
