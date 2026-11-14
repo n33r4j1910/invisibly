@@ -1,12 +1,13 @@
 END USER LICENSE AGREEMENT (EULA)
+Last Updated: November 14, 2026
 
 IMPORTANT: PLEASE READ THIS LICENSE CAREFULLY BEFORE USING THE SOFTWARE.
 
 1. LICENSE GRANT
 Invisibly ("Software") is licensed, not sold. The Software is developed and 
 owned by DeltaIQx LLP. The user is granted a non-exclusive, non-transferable 
-license to use the Software for personal or commercial purposes as defined in 
-the purchased subscription plan.
+license to use the Software for personal or commercial purposes, subject to
+these terms and to the plan you use (Free or Pro, see section 3).
 
 2. RESTRICTIONS
 The user may NOT:
@@ -16,25 +17,49 @@ The user may NOT:
 - Remove any proprietary notices or labels, including the DeltaIQx LLP name
 
 3. SUBSCRIPTION TERMS
-Access to the Software requires a valid paid subscription. Subscription 
-plans, pricing, and features are subject to change with prior notice.
+The Free plan gives detection and alerts at no cost. The Pro plan is a paid
+subscription, billed by the Microsoft Store, that turns on automatic repairs and
+other Pro features. Plans, pricing, and features are subject to change with
+prior notice.
 
 4. NO WARRANTY
-THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS 
-OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
+THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
 
-5. LIABILITY
-IN NO EVENT SHALL DELTAIQX LLP BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER 
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, 
-OUT OF OR IN CONNECTION WITH THE SOFTWARE.
+Invisibly is designed to help protect your PC from threats and to safeguard
+your privacy, and it does its best to do so. No security tool can catch every
+threat, and Invisibly may miss something or occasionally flag something
+harmless. Its alerts and recommendations are guidance only.
 
-6. TERMINATION
+5. YOUR RESPONSIBILITY AND AUTOMATIC CHANGES
+You are responsible for your own decisions. Use your own judgment before you
+allow an item, reset the baseline, roll back changes or ignore an alert. If you
+are unsure, check before you trust it. Invisibly supports good security habits
+(updates, strong passwords, care with downloads and links, backups of files you
+cannot afford to lose); it does not replace them or professional security
+advice.
+Where your plan includes automatic repair, you authorise Invisibly to change
+Windows security settings on this PC to restore them to their saved safe state.
+
+6. THIRD-PARTY SERVICES
+Invisibly works offline. Optional features use third parties: the Microsoft
+Store (updates and subscription billing), GitHub (the once-a-day security-list
+download) and Quad9 (Safe Browsing, only if you switch it on). Their own terms
+and privacy policies apply to those services.
+
+7. LIABILITY
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, IN NO EVENT SHALL DELTAIQX LLP BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE, INCLUDING LOSS OF DATA OR A THREAT THAT WAS NOT DETECTED.
+
+8. TERMINATION
 This license is effective until terminated. The license will terminate 
 automatically without notice if the user fails to comply with any term.
 Upon termination, the user must cease all use and delete the Software.
 
-7. GOVERNING LAW
+9. GOVERNING LAW
 This agreement shall be governed by the laws of India.
 
 © 2026 DeltaIQx LLP. All rights reserved.
