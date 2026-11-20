@@ -12,7 +12,7 @@ Antivirus catches known bad files. Invisibly catches the quiet changes that atta
 
 ## What it does, in plain words
 
-Your PC has settings that keep you safe: the firewall (the gate that blocks unwanted connections), Windows Defender (Windows' built-in antivirus), and the "address book" that decides which website you reach when you type a name (DNS). Attackers know the easiest way in is often not a virus — it's quietly switching one of these off or changing it. Windows won't tell you when that happens, and your antivirus isn't looking at settings.
+Your PC has settings that keep you safe: the firewall (the gate that blocks unwanted connections), Windows Defender (Windows' built-in antivirus), and the "address book" that decides which website you reach when you type a name (DNS). Attackers know the easiest way in is often not a virus — it's quietly switching one of these off or changing it. Windows usually shows only a small warning icon that is easy to miss, and your antivirus is busy looking at files, not at the rest of your settings.
 
 Invisibly remembers how your settings *should* look, checks them about every 30 seconds, and when something changes that you didn't change, it puts it back. If a decision really needs a person, it tells you in one clear sentence.
 
@@ -28,9 +28,9 @@ Antivirus looks for bad *files*. Invisibly looks for bad *changes*. Most success
 
 **In plain words:** Windows already has a firewall, Defender and other protections. Invisibly doesn't replace them — it makes sure nobody has quietly switched them off. Concretely:
 
-- **Defender gets disabled — or told to ignore a folder** (by malware, a rogue app, or an accidental click) → Windows stays silent about it. *Why it matters: a switched-off or blinded antivirus is how malware gets a free pass.* Invisibly alerts you, can turn Defender back on, and removes a risky "ignore this folder" rule (a Defender exclusion) the moment it appears.
+- **Defender gets disabled — or told to ignore a folder** (by malware, a rogue app, or an accidental click) → Windows shows at most a small warning icon, easy to miss. *Why it matters: a switched-off or blinded antivirus is how malware gets a free pass.* Invisibly alerts you, can turn Defender back on, and removes a risky "ignore this folder" rule (a Defender exclusion) the moment it appears.
 - **A protection gets quietly switched off** — Tamper Protection (which stops other programs from turning Defender off), the shield around your Windows sign-in secrets (LSASS protection), the old unsafe SMBv1 file-sharing method → Windows doesn't announce it. *Why it matters: these are the locks attackers pick before stealing passwords or spreading to other PCs.* Invisibly notices and, where it's safe, switches them back.
-- **DNS or your hosts file gets silently redirected** — a common way to steal banking or email logins by pointing a real-looking address at a fake site → neither Windows nor a normal antivirus checks for this. *Why it matters: you can type your bank's real address and still land on a copy.* Invisibly checks, continuously.
+- **DNS or your hosts file gets silently redirected** — a common way to steal banking or email logins by pointing a real-looking address at a fake site → Windows does not check for this, and most antivirus products only guard the hosts file, not the rest. *Why it matters: you can type your bank's real address and still land on a copy.* Invisibly checks, continuously.
 - **Remote Desktop (RDP) gets turned on** without you doing it — a classic sign someone already has a foothold on your machine → *Why it matters: it lets a stranger control your PC from far away.* Invisibly catches it and disables it automatically.
 - **A malicious root certificate gets installed** — this lets an attacker silently read traffic you think is secure (the padlock icon still shows) → there's no Windows setting that flags this. *Why it matters: the padlock stops meaning "private".* Invisibly flags it.
 - **Something adds itself to startup, a scheduled task, or a background service** — how most malware survives a reboot → you'd otherwise have to know where to look in Task Manager. *Why it matters: it's how a bad program keeps coming back.* Invisibly checks automatically.
@@ -91,102 +91,115 @@ To be precise about scope: it's not an antivirus, an EDR (enterprise endpoint de
 
 ## At a glance: what makes Invisibly different
 
+**The biggest difference: Invisibly works fully offline.** Its checks and repairs need no internet, no account and no cloud. Antivirus and EDR products rely on cloud lookups and online management consoles to do their best work. (Invisibly's only internet use is two optional things you can switch off: a once-a-day signed-list download and Safe Browsing.)
+
 | | Antivirus | Windows Firewall | Enterprise EDR | **Invisibly** |
 |---|:---:|:---:|:---:|:---:|
-| Scans files for known viruses | ✅ | ❌ | ✅ | ❌ *(by design — see "What Invisibly is not")* |
-| Watches your security **settings** for tampering | ❌ | ❌ | ⚠️ needs IT setup | ✅ |
-| Fixes things automatically when it's safe to | ❌ | ❌ | ⚠️ | ✅ |
+| Works fully offline, no account, no cloud | ⚠️ scans yes, best protection needs cloud | ✅ | ❌ cloud-managed | ✅ |
+| Scans files for known viruses | ✅ | ❌ | ✅ | ❌ *(by design, see "What Invisibly is not")* |
+| Stops unknown malware as it runs | ✅ | ❌ | ✅ | ❌ *(only ransomware, miners, fork bombs, data thieves)* |
+| Blocks network connections by rule | ⚠️ suites only | ✅ | ⚠️ | ⚠️ *(brute-force blocks, Ghost Mode)* |
+| Watches your security **settings** for tampering | ⚠️ its own settings and Windows' main switches | ❌ | ✅ with setup | ✅ |
+| Fixes settings back automatically | ⚠️ re-enables itself | ❌ | ✅ with setup | ✅ *(Pro; Free alerts only)* |
 | Works out of the box, no IT admin needed | ✅ | ✅ | ❌ | ✅ |
-| Runs locally — no data leaves your PC (optional daily update check) | ❌ | ✅ | ❌ | ✅ |
+| Central management for many PCs | ⚠️ business editions | ⚠️ via Group Policy | ✅ | ❌ |
+| Independently audited / certified | ✅ | ✅ | ✅ | ❌ not yet |
 | Typical memory use | 200–500 MB | <50 MB | 500 MB–2 GB | ~30 MB |
 
 *This is the short version. For the full technical breakdown of all 58 monitored signals, see the detailed table below.*
 
 ## Full Technical Comparison (58 Signals)
 
-*A "signal" is one thing Invisibly keeps an eye on. ✅ = does it, ❌ = doesn't, ⚠️ = partly or depends on the vendor.*
+*A "signal" is one thing Invisibly keeps an eye on. ✅ = does it as a normal part of the product, ❌ = doesn't, ⚠️ = partly, only some products, or only with extra setup. "EDR" means products such as Microsoft Defender for Endpoint or CrowdStrike. A real EDR sees far more than Invisibly (every process, file and network event); this table only compares the things Invisibly watches, and the first block shows where the others are stronger.*
 
 | Capability | Antivirus | Firewall | EDR | Invisibly |
 |---|:---:|:---:|:---:|:---:|
-| **Core Protection** | | | | |
+| **Where the others are stronger** | | | | |
 | Malware Scanning | ✅ | ❌ | ✅ | ❌ *(not Invisibly's job by design)* |
 | Virus Signature Updates | ✅ | ❌ | ✅ | ❌ |
 | File Quarantine | ✅ | ❌ | ✅ | ❌ |
+| Stops Unknown Malware as It Runs (kernel-level) | ✅ | ❌ | ✅ | ❌ *(runs as a normal program, not a driver)* |
+| Blocks Network Traffic by Rule | ⚠️ | ✅ | ⚠️ | ⚠️ |
+| Central Management of Many PCs | ⚠️ | ⚠️ | ✅ | ❌ |
+| **Offline and Privacy** | | | | |
+| Full Protection With No Internet | ⚠️ | ✅ | ❌ | ✅ |
+| No Account, No Cloud, No Telemetry | ⚠️ | ✅ | ❌ | ✅ |
 | **Configuration Integrity** | | | | |
-| Endpoint Integrity Monitoring | ❌ | ❌ | ⚠️ | ✅ |
+| Endpoint Integrity Monitoring (saved baseline) | ❌ | ❌ | ⚠️ | ✅ |
 | Integrity Score | ❌ | ❌ | ⚠️ | ✅ |
-| Automatic Security Repair | ❌ | ❌ | ⚠️ | ✅ |
-| Configuration Drift Detection | ❌ | ❌ | ⚠️ | ✅ |
+| Automatic Security Repair | ⚠️ | ❌ | ⚠️ | ✅ *(Pro)* |
+| Configuration Drift Detection | ⚠️ | ❌ | ⚠️ | ✅ |
+| Tamper-evident Event Timeline | ⚠️ | ⚠️ | ✅ | ✅ |
 | **Network Protection** | | | | |
-| DNS Monitoring | ❌ | ❌ | ⚠️ | ✅ |
-| Hosts File Monitoring | ❌ | ❌ | ⚠️ | ✅ |
-| Proxy Monitoring | ❌ | ❌ | ⚠️ | ✅ |
-| ARP Spoofing Detection | ❌ | ❌ | ❌ | ✅ |
-| New Network Device Detection | ❌ | ❌ | ⚠️ | ✅ |
-| Brute-force Detection | ❌ | ❌ | ⚠️ | ✅ |
-| DNS-over-HTTPS and IPv6 Status Monitoring | ❌ | ❌ | ❌ | ✅ |
+| DNS Monitoring | ⚠️ | ❌ | ✅ | ✅ |
+| Hosts File Monitoring | ⚠️ | ❌ | ⚠️ | ✅ |
+| Proxy Monitoring | ⚠️ | ❌ | ⚠️ | ✅ |
+| ARP Spoofing Detection | ⚠️ | ❌ | ⚠️ | ✅ |
+| New Network Device Detection | ⚠️ | ❌ | ✅ | ✅ |
+| Brute-force Detection | ⚠️ | ⚠️ | ✅ | ✅ |
+| DNS-over-HTTPS and IPv6 Status Monitoring | ❌ | ❌ | ⚠️ | ✅ |
 | DHCP Configuration Monitoring | ❌ | ❌ | ⚠️ | ✅ |
-| VPN State Monitoring | ❌ | ❌ | ❌ | ✅ |
-| Wi-Fi Safety (open or weak network, fake copy of a trusted network, changed router) | ❌ | ⚠️ | ⚠️ | ✅ |
-| Known-Bad Site / DNS / Proxy Match (signed threat list) + Known-Bad Site Stop (Pro) | ⚠️ | ❌ | ⚠️ | ✅ |
-| Safe Browsing (filtering DNS, on by default where it cannot override you) | ⚠️ | ❌ | ❌ | ✅ |
-| Crypto-Mining Server Lookup Alert | ❌ | ❌ | ⚠️ | ✅ |
-| Data Smuggling Through DNS (tunnelling) Detection | ❌ | ❌ | ⚠️ | ✅ |
-| Risky Website-Name Alerts (dynamic-DNS, machine-generated, look-alike, .zip/.mov) | ❌ | ❌ | ⚠️ | ✅ |
+| VPN State Monitoring | ❌ | ❌ | ⚠️ | ✅ |
+| Wi-Fi Safety (open or weak network, fake copy of a trusted network, changed router) | ⚠️ | ⚠️ | ⚠️ | ✅ |
+| Known-Bad Site / DNS / Proxy Match (signed threat list) + Known-Bad Site Stop (Pro) | ✅ | ❌ | ✅ | ✅ |
+| Safe Browsing (filtering DNS, on by default where it cannot override you) | ✅ | ❌ | ⚠️ | ✅ |
+| Crypto-Mining Server Lookup Alert | ⚠️ | ❌ | ✅ | ✅ |
+| Data Smuggling Through DNS (tunnelling) Detection | ❌ | ❌ | ✅ | ✅ |
+| Risky Website-Name Alerts (dynamic-DNS, machine-generated, look-alike, .zip/.mov) | ⚠️ | ❌ | ⚠️ | ✅ |
 | **Windows Security Controls** | | | | |
-| Windows Firewall Monitoring | ❌ | ❌ | ⚠️ | ✅ |
-| Windows Defender Monitoring | ❌ | ❌ | ⚠️ | ✅ |
-| UAC Monitoring | ❌ | ❌ | ❌ | ✅ |
-| Windows Update Monitoring | ❌ | ❌ | ❌ | ✅ |
-| System Restore Monitoring | ❌ | ❌ | ❌ | ✅ |
-| SmartScreen Monitoring | ❌ | ❌ | ❌ | ✅ |
-| Secure Boot Monitoring | ❌ | ❌ | ⚠️ | ✅ |
-| LAPS Monitoring | ❌ | ❌ | ❌ | ✅ |
-| Defender Exclusion Monitoring + Automatic Removal | ❌ | ❌ | ⚠️ | ✅ |
-| Security Setting Tamper Guard (Tamper Protection, SMBv1, sign-in secrets shield) | ❌ | ❌ | ⚠️ | ✅ |
-| BitLocker Monitoring | ❌ | ❌ | ⚠️ | ✅ |
-| Credential Guard Monitoring | ❌ | ❌ | ⚠️ | ✅ |
+| Windows Firewall Monitoring | ⚠️ | ❌ | ✅ | ✅ |
+| Windows Defender Monitoring | ⚠️ | ❌ | ✅ | ✅ |
+| UAC Monitoring | ❌ | ❌ | ⚠️ | ✅ |
+| Windows Update Monitoring | ⚠️ | ❌ | ✅ | ✅ |
+| System Restore Monitoring | ❌ | ❌ | ⚠️ | ✅ |
+| SmartScreen Monitoring | ⚠️ | ❌ | ⚠️ | ✅ |
+| Secure Boot Monitoring | ❌ | ❌ | ✅ | ✅ |
+| LAPS Monitoring | ❌ | ❌ | ⚠️ | ✅ |
+| Defender Exclusion Monitoring + Automatic Removal | ⚠️ | ❌ | ✅ | ✅ |
+| Security Setting Tamper Guard (Tamper Protection, SMBv1, sign-in secrets shield) | ⚠️ | ❌ | ⚠️ | ✅ |
+| BitLocker Monitoring | ❌ | ❌ | ✅ | ✅ |
+| Credential Guard Monitoring | ❌ | ❌ | ✅ | ✅ |
 | Windows Event Log Monitoring + Automatic Restart | ❌ | ❌ | ⚠️ | ✅ |
 | Trusted Root Certificate Monitoring | ❌ | ❌ | ⚠️ | ✅ |
-| Out-of-date Risky App and Windows Patch-Age Reminder | ⚠️ | ❌ | ⚠️ | ✅ |
-| Unexpected New Software Notice | ❌ | ❌ | ⚠️ | ✅ |
+| Out-of-date Risky App and Windows Patch-Age Reminder | ⚠️ | ❌ | ✅ | ✅ |
+| Unexpected New Software Notice | ⚠️ | ❌ | ✅ | ✅ |
 | **Persistence Monitoring** | | | | |
-| Startup Entry Monitoring | ❌ | ❌ | ⚠️ | ✅ |
-| New Startup Program Check (signature + location) | ⚠️ | ❌ | ⚠️ | ✅ |
-| Scheduled Task Monitoring | ❌ | ❌ | ⚠️ | ✅ |
-| Windows Services Monitoring | ❌ | ❌ | ⚠️ | ✅ |
-| Hidden Start-up Hook Monitoring (Winlogon, debugger, AppInit) | ❌ | ❌ | ⚠️ | ✅ |
+| Startup Entry Monitoring | ⚠️ | ❌ | ✅ | ✅ |
+| New Startup Program Check (signature + location) | ⚠️ | ❌ | ✅ | ✅ |
+| Scheduled Task Monitoring | ⚠️ | ❌ | ✅ | ✅ |
+| Windows Services Monitoring | ⚠️ | ❌ | ✅ | ✅ |
+| Hidden Start-up Hook Monitoring (Winlogon, debugger, AppInit) | ⚠️ | ❌ | ✅ | ✅ |
 | **Account Monitoring** | | | | |
-| New User Account Alert | ❌ | ❌ | ⚠️ | ✅ |
-| New Administrator Alert | ❌ | ❌ | ⚠️ | ✅ |
+| New User Account Alert | ❌ | ❌ | ✅ | ✅ |
+| New Administrator Alert | ❌ | ❌ | ✅ | ✅ |
 | **Hardware Protection** | | | | |
-| HID Device Monitoring | ❌ | ❌ | ⚠️ | ✅ |
+| HID Device Monitoring | ⚠️ | ❌ | ⚠️ | ✅ |
 | Bluetooth Device Monitoring | ❌ | ❌ | ⚠️ | ✅ |
-| Fake Keyboard (BadUSB) Alert | ❌ | ❌ | ⚠️ | ✅ |
-| Camera / Microphone Spy Alert | ❌ | ❌ | ⚠️ | ✅ |
+| Fake Keyboard (BadUSB) Alert | ⚠️ | ❌ | ⚠️ | ✅ |
+| Camera / Microphone Spy Alert | ⚠️ | ❌ | ⚠️ | ✅ |
 | Unknown Network Adapter Detection | ❌ | ❌ | ⚠️ | ✅ |
 | **Threat Detection** | | | | |
-| Homoglyph Domain Detection | ❌ | ❌ | ❌ | ✅ |
-| Unicode Bidi / Zero-width Attack Detection | ❌ | ❌ | ❌ | ✅ |
-| Suspicious Process Detection | ⚠️ | ❌ | ⚠️ | ✅ |
-| Real-Time Ransomware Detection + Pause | ⚠️ | ❌ | ⚠️ | ✅ |
-| Remote-Access / Tunnel Tool Alert | ❌ | ❌ | ⚠️ | ✅ |
-| Remote Desktop (RDP) Enabled Detection + Automatic Disable | ❌ | ❌ | ⚠️ | ✅ |
-| Fake File Extension Detection (invoice.pdf.exe) | ⚠️ | ❌ | ⚠️ | ✅ |
-| Fake "I am not a robot" (ClickFix) Detection | ❌ | ❌ | ⚠️ | ✅ |
-| Hidden Crypto-Miner Detection + Pause | ⚠️ | ❌ | ⚠️ | ✅ |
+| Homoglyph Domain Detection | ⚠️ | ❌ | ⚠️ | ✅ |
+| Unicode Bidi / Zero-width Attack Detection | ❌ | ❌ | ⚠️ | ✅ |
+| Suspicious Process Detection | ✅ | ❌ | ✅ | ⚠️ *(Temp/Downloads/Desktop only)* |
+| Real-Time Ransomware Detection + Pause | ✅ | ❌ | ✅ | ✅ |
+| Remote-Access / Tunnel Tool Alert | ⚠️ | ❌ | ✅ | ✅ |
+| Remote Desktop (RDP) Enabled Detection + Automatic Disable | ❌ | ⚠️ | ✅ | ✅ |
+| Fake File Extension Detection (invoice.pdf.exe) | ✅ | ❌ | ✅ | ✅ |
+| Fake "I am not a robot" (ClickFix) Detection | ⚠️ | ❌ | ⚠️ | ⚠️ *(after the fact, warns only)* |
+| Hidden Crypto-Miner Detection + Pause | ✅ | ❌ | ✅ | ✅ |
 | Runaway-Program (fork bomb) Stop | ❌ | ❌ | ⚠️ | ✅ |
 | Browser Extension and Settings Hijack Monitoring | ⚠️ | ❌ | ⚠️ | ✅ |
-| Android Emulator Alert | ❌ | ❌ | ❌ | ✅ |
-| Ghost Mode (public Wi-Fi lock-down) | ❌ | ⚠️ | ❌ | ✅ |
+| Android Emulator Alert | ❌ | ❌ | ⚠️ | ✅ |
+| Ghost Mode (public Wi-Fi lock-down) | ⚠️ | ⚠️ | ❌ | ✅ |
 | **Data-Theft Protection** | | | | |
 | Decoy Secret Files (fake key, fake password list) Alert | ❌ | ❌ | ⚠️ | ✅ |
 | Secret-Thief Stop (program sweeping the decoys) | ❌ | ❌ | ⚠️ | ✅ |
-| Browser Cookie / Saved-Login Theft Watch | ⚠️ | ❌ | ⚠️ | ✅ |
-| Wallet, Chat-app, Password-manager and Key-folder Watch | ❌ | ❌ | ⚠️ | ✅ |
+| Browser Cookie / Saved-Login Theft Watch | ⚠️ | ❌ | ✅ | ✅ |
+| Wallet, Chat-app, Password-manager and Key-folder Watch | ⚠️ | ❌ | ⚠️ | ✅ |
 | Unprotected Key / Credential File Reminder | ❌ | ❌ | ⚠️ | ✅ |
 
-*⚠️ = Partial or vendor-dependent*
+*⚠️ = partial, vendor-dependent or needs extra setup. Competitor ratings are general: they vary by product and edition.*
 
 ## Security Testing Results
 
