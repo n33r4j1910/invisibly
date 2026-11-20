@@ -4,7 +4,7 @@
 
 **Invisibly is a silent guard for your Windows PC. It notices when something quietly changes your security settings — hijacked internet (DNS), a switched-off firewall or Defender, fake security certificates, new startup programs — and puts things right automatically.**
 
-- **Works offline.** Everything runs on your own computer. No account, no sign-in, no cloud.
+- **Works offline.** Everything runs on your own computer. No account, no sign-in, no cloud. The only internet use is two things you can switch off: a once-a-day signed-list download and Safe Browsing (Quad9 DNS), both explained in *Offline and private by design* below.
 - **Captures nothing about you.** No name, email, files, passwords or browsing history is read or sent. No telemetry, no tracking.
 - **Nothing to manage.** You see one thing: *Protected*.
 
@@ -47,10 +47,11 @@ Automatic repair is a Pro feature. On Free, Invisibly detects and alerts as befo
 
 ## Offline and private by design
 
-**In plain words:** nothing about you leaves your PC. There is nothing to sign up for and nothing to collect.
+**In plain words:** Invisibly itself sends nothing about you. There is nothing to sign up for and nothing to collect. Two optional features use the internet and can be switched off; they are listed here.
 
 - **Fully offline.** Watching, repairing, and stopping ransomware or crypto-miners all happen on your PC with no internet connection needed.
 - **One optional, one-way download.** Once a day Invisibly can fetch a signed list of newly found bad programs and websites. It sends nothing back — not even who you are — and you can turn it off in Advanced > Protections.
+- **Safe Browsing (Quad9 DNS), on by default where it cannot override anyone.** Your website lookups then go to Quad9 instead of your provider, so Quad9 sees those website names (and your internet address, as any DNS does). It is left off when you or your company set your own DNS. Switch it off any time in the dashboard.
 - **Never captured:** your name, email, phone, location, passwords, browsing history, documents or file contents. No device IDs, ad IDs, crash reports, usage statistics, analytics or tracking code.
 - **Stays on your device.** Every check is read, judged and stored locally in `C:\ProgramData\Invisibly`. Delete that folder after uninstalling and nothing is left.
 
@@ -64,7 +65,7 @@ No security tool can promise to catch everything. Invisibly does its best, but i
 
 Invisibly supports your own good habits (updates, strong passwords, care with downloads and links). It doesn't replace them. It isn't a substitute for professional security advice or for backups of the files you can't afford to lose.
 
-**Invisibly works completely offline: its checks and repairs need no internet connection, and no personal data is collected from our side.**
+**Invisibly works completely offline: its checks and repairs need no internet connection, and no personal data is collected from our side. The only internet use is the optional daily list download and Safe Browsing (Quad9 DNS), both described under Offline and private by design.**
 
 **No cloud. No telemetry. No AI. Everything runs locally.**
 
@@ -80,7 +81,9 @@ To be precise about scope: it's not an antivirus, an EDR (enterprise endpoint de
 
 - **It reports changes.** Most checks compare against how your PC looked when Invisibly first saw it. If something was already weak at that moment, a check may not call it out. Where we found this to matter (for example BitLocker already switched off) it now shows a quiet warning, but not every check can.
 - **It can not stop brand-new malware, and it can not stop a program running as you from reading your own files.** The optional theft guard places fake secret files and tells you if a program touches them, and it reminds you when real keys or passwords are lying around unprotected. It warns; it does not lock your files.
-- **Website-name checks read Windows' recent lookups.** Very short-lived names, and made-up names that do not exist, can be missed.
+- **Website-name checks read Windows' recent lookups.** Very short-lived names, and made-up names that do not exist, can be missed. A browser that uses its own secure DNS (DNS over HTTPS, switched on inside the browser) does not put its lookups in Windows' list, so Invisibly cannot see those sites.
+- **It runs as a normal Windows program, not as a kernel driver.** It can watch Windows' list of known-dangerous drivers, put that setting back if it is switched off, and warn about a driver loaded from a user folder. It cannot stop a driver from loading, and it cannot defend against malware that already runs with kernel-level power.
+- **The fake "I am not a robot" check reads history, after the fact.** It sees a pasted command in the Windows Run box once the command has been run, and only warns. It does not read what you type anywhere else.
 - **Its own saved data is protected, not unbreakable.** The seal key is tied to your Windows account and its file can only be read by Invisibly's administrator-level program, which stops other accounts and ordinary programs running as you. Malware that you allow to run as administrator can still reach it.
 - **Not yet independently audited.** Treat it as an extra pair of eyes, not a guarantee.
 
@@ -97,9 +100,9 @@ To be precise about scope: it's not an antivirus, an EDR (enterprise endpoint de
 | Runs locally — no data leaves your PC (optional daily update check) | ❌ | ✅ | ❌ | ✅ |
 | Typical memory use | 200–500 MB | <50 MB | 500 MB–2 GB | ~30 MB |
 
-*This is the short version. For the full technical breakdown of all 56 monitored signals, see the detailed table below.*
+*This is the short version. For the full technical breakdown of all 58 monitored signals, see the detailed table below.*
 
-## Full Technical Comparison (56 Signals)
+## Full Technical Comparison (58 Signals)
 
 *A "signal" is one thing Invisibly keeps an eye on. ✅ = does it, ❌ = doesn't, ⚠️ = partly or depends on the vendor.*
 
@@ -121,6 +124,15 @@ To be precise about scope: it's not an antivirus, an EDR (enterprise endpoint de
 | ARP Spoofing Detection | ❌ | ❌ | ❌ | ✅ |
 | New Network Device Detection | ❌ | ❌ | ⚠️ | ✅ |
 | Brute-force Detection | ❌ | ❌ | ⚠️ | ✅ |
+| DNS-over-HTTPS and IPv6 Status Monitoring | ❌ | ❌ | ❌ | ✅ |
+| DHCP Configuration Monitoring | ❌ | ❌ | ⚠️ | ✅ |
+| VPN State Monitoring | ❌ | ❌ | ❌ | ✅ |
+| Wi-Fi Safety (open or weak network, fake copy of a trusted network, changed router) | ❌ | ⚠️ | ⚠️ | ✅ |
+| Known-Bad Site / DNS / Proxy Match (signed threat list) + Known-Bad Site Stop (Pro) | ⚠️ | ❌ | ⚠️ | ✅ |
+| Safe Browsing (filtering DNS, on by default where it cannot override you) | ⚠️ | ❌ | ❌ | ✅ |
+| Crypto-Mining Server Lookup Alert | ❌ | ❌ | ⚠️ | ✅ |
+| Data Smuggling Through DNS (tunnelling) Detection | ❌ | ❌ | ⚠️ | ✅ |
+| Risky Website-Name Alerts (dynamic-DNS, machine-generated, look-alike, .zip/.mov) | ❌ | ❌ | ⚠️ | ✅ |
 | **Windows Security Controls** | | | | |
 | Windows Firewall Monitoring | ❌ | ❌ | ⚠️ | ✅ |
 | Windows Defender Monitoring | ❌ | ❌ | ⚠️ | ✅ |
@@ -132,6 +144,12 @@ To be precise about scope: it's not an antivirus, an EDR (enterprise endpoint de
 | LAPS Monitoring | ❌ | ❌ | ❌ | ✅ |
 | Defender Exclusion Monitoring + Automatic Removal | ❌ | ❌ | ⚠️ | ✅ |
 | Security Setting Tamper Guard (Tamper Protection, SMBv1, sign-in secrets shield) | ❌ | ❌ | ⚠️ | ✅ |
+| BitLocker Monitoring | ❌ | ❌ | ⚠️ | ✅ |
+| Credential Guard Monitoring | ❌ | ❌ | ⚠️ | ✅ |
+| Windows Event Log Monitoring + Automatic Restart | ❌ | ❌ | ⚠️ | ✅ |
+| Trusted Root Certificate Monitoring | ❌ | ❌ | ⚠️ | ✅ |
+| Out-of-date Risky App and Windows Patch-Age Reminder | ⚠️ | ❌ | ⚠️ | ✅ |
+| Unexpected New Software Notice | ❌ | ❌ | ⚠️ | ✅ |
 | **Persistence Monitoring** | | | | |
 | Startup Entry Monitoring | ❌ | ❌ | ⚠️ | ✅ |
 | New Startup Program Check (signature + location) | ⚠️ | ❌ | ⚠️ | ✅ |
@@ -153,6 +171,20 @@ To be precise about scope: it's not an antivirus, an EDR (enterprise endpoint de
 | Suspicious Process Detection | ⚠️ | ❌ | ⚠️ | ✅ |
 | Real-Time Ransomware Detection + Pause | ⚠️ | ❌ | ⚠️ | ✅ |
 | Remote-Access / Tunnel Tool Alert | ❌ | ❌ | ⚠️ | ✅ |
+| Remote Desktop (RDP) Enabled Detection + Automatic Disable | ❌ | ❌ | ⚠️ | ✅ |
+| Fake File Extension Detection (invoice.pdf.exe) | ⚠️ | ❌ | ⚠️ | ✅ |
+| Fake "I am not a robot" (ClickFix) Detection | ❌ | ❌ | ⚠️ | ✅ |
+| Hidden Crypto-Miner Detection + Pause | ⚠️ | ❌ | ⚠️ | ✅ |
+| Runaway-Program (fork bomb) Stop | ❌ | ❌ | ⚠️ | ✅ |
+| Browser Extension and Settings Hijack Monitoring | ⚠️ | ❌ | ⚠️ | ✅ |
+| Android Emulator Alert | ❌ | ❌ | ❌ | ✅ |
+| Ghost Mode (public Wi-Fi lock-down) | ❌ | ⚠️ | ❌ | ✅ |
+| **Data-Theft Protection** | | | | |
+| Decoy Secret Files (fake key, fake password list) Alert | ❌ | ❌ | ⚠️ | ✅ |
+| Secret-Thief Stop (program sweeping the decoys) | ❌ | ❌ | ⚠️ | ✅ |
+| Browser Cookie / Saved-Login Theft Watch | ⚠️ | ❌ | ⚠️ | ✅ |
+| Wallet, Chat-app, Password-manager and Key-folder Watch | ❌ | ❌ | ⚠️ | ✅ |
+| Unprotected Key / Credential File Reminder | ❌ | ❌ | ⚠️ | ✅ |
 
 *⚠️ = Partial or vendor-dependent*
 
@@ -173,9 +205,9 @@ Invisibly has been tested through multiple independent security platforms to ver
 
 **In plain words:** Invisibly keeps an eye on everything an attacker is likely to touch first, grouped below by topic. Each group says what it covers and why it matters.
 
-Invisibly watches the security settings that attackers target — 56 signals in total. Some bullets cover more than one check.
+Invisibly watches the security settings that attackers target — 58 signals in total. Some bullets cover more than one check.
 
-**Network (19 signals)**
+**Network (20 signals)**
 
 *Your internet connection. Why it matters: change this and an attacker can send you to fake sites or listen in.*
 
@@ -192,6 +224,7 @@ Invisibly watches the security settings that attackers target — 56 signals in 
 - DNS server or proxy matches a signed known-bad threat feed
 - Wi-Fi safety (open or weak network, fake copy of a trusted network, changed router)
 - Website names looked up: crypto-coin mining servers (on by default); free dynamic-DNS addresses, machine-generated looking names, and risky names such as .zip/.mov, throw-away names or one-letter-off copies of famous sites (off by default)
+- Data smuggling through DNS: many long, random-looking lookups under one website (on by default, can be switched off; remembers the last 15 minutes of lookups so a quick burst is not missed)
 
 **Security Controls (15 signals)**
 
@@ -206,7 +239,7 @@ Invisibly watches the security settings that attackers target — 56 signals in 
 - Windows Event Log (the PC's activity diary; a stopped log is restarted automatically)
 - Trusted root certificate authorities (a new one can enable silent HTTPS interception)
 - Far out-of-date risky apps (browser, Zoom, PDF reader... - a gentle reminder to update)
-- Security settings switched off later (Defender Tamper Protection, the Windows sign-in secrets shield, old SMBv1 file sharing, Office macro safety, Windows Script Host - put back automatically where that is safe)
+- Security settings switched off later (Defender Tamper Protection, the Windows sign-in secrets shield, old SMBv1 file sharing, Office macro safety, Windows Script Host, Windows' list of known-dangerous drivers, the Windows sign-in (NTLM) strength, the web-folder (WebDAV) client that sign-in leak attacks use - put back automatically where that is safe)
 
 **Persistence (6 signals)**
 
@@ -214,7 +247,7 @@ Invisibly watches the security settings that attackers target — 56 signals in 
 
 - Startup entries, with each new startup program checked by its digital signature (proof of who made it) and where it lives
 - Scheduled tasks and Windows Services
-- Hidden start-up hooks (a changed sign-in shell or Userinit, a debugger planted on another program, AppInit DLLs, start-up policy entries — the first three are put back automatically)
+- Hidden start-up hooks (a changed sign-in shell or Userinit, a debugger planted on another program, AppInit DLLs, start-up policy entries, a driver loaded from a user folder such as Downloads or Temp, which is how attackers switch security tools off — the first three are put back automatically, a suspicious driver only raises an alert)
 - Risky browser extensions and hijacked browser settings (Chrome, Edge, Brave: add-ons installed outside the official store, changed search engine, home page or proxy)
 
 **Accounts (2 signals)**
@@ -242,15 +275,16 @@ Invisibly watches the security settings that attackers target — 56 signals in 
 - Unexpected new software installed (noted quietly, no pop-up)
 - Remote-access / tunnel tools that weren't there before (AnyDesk, TeamViewer, ngrok... - the tech-support-scam step)
 - Camera or microphone used by an unsigned program, or one running from Downloads/Temp (spyware)
-- Data-thief trap: fake secret files (a fake key, a fake password list) that no honest program opens. If a program reads, changes or deletes one, you are told. It also reminds you when real keys or passwords are lying around unprotected (file names only, never contents). Optional, off by default, and switching it off removes the fake files
+- Data-thief trap: fake secret files (a fake key, a fake password list) that no honest program opens. If a program reads, changes or deletes one, you are told. With key-folder protection on, you are also told when an unknown program tries to open your browser's saved logins and cookies, your chat-app and crypto-wallet folders, your password-manager folders or your key folders (the way data thieves take over accounts); each folder's own program (Firefox for Firefox, Discord for Discord) is never flagged. Pro also ends a program that opens 3 or more different fake files, which only a thief sweeping the PC does (see Secret-Thief Stop below). It also reminds you when real keys or passwords are lying around unprotected (file names only, never contents). On by default, can be switched off, and switching it off removes the fake files
 
-**Social Engineering (3 signals)**
+**Social Engineering (4 signals)**
 
 *Tricks designed to fool you, not the computer.*
 
 - Homoglyph domains (website names that swap in look-alike letters, like a Cyrillic "о" for an "o")
 - Unicode bidi / zero-width character attacks (hidden characters disguising a redirect)
 - Fake file extensions (e.g. `invoice.pdf.exe`)
+- Fake "I am not a robot" tricks (ClickFix): reads the Windows Run-box history and warns if a pasted download-and-run command was run. It never stores the command, and only alerts, because you may have typed it on purpose
 
 > **Note on BitLocker:** BitLocker Drive Encryption isn't available on every Windows setup — it needs a BitLocker-capable edition (Pro/Enterprise/Education) or Windows Home Device encryption, and a TPM. Where Windows cannot report the status at all, that specific check has nothing to report and stays quiet rather than alerting on a status it can't determine. Where Windows reports that protection is off (for example a drive that is encrypted but has no key protector), Invisibly shows a quiet warning instead of saying "enabled". Every other signal is unaffected.
 
@@ -311,6 +345,36 @@ Auto-enables on public networks, auto-disables when you're back on a trusted one
 - Blocks inbound ICMP (ping requests)
 - Disables Network Discovery and file sharing
 
+## Safe Browsing (known-bad websites fail to load)
+
+**In plain words:** Invisibly can point your PC at Quad9, a free, privacy-minded address book (DNS) that refuses to give out the address of websites known to spread malware or steal logins. A bad site then simply does not load.
+
+It is **on by default**, but only where it cannot override anyone: when your PC takes its DNS from your router or internet provider, and is not joined to a company network. A DNS you typed in yourself, or a company one, is left alone. After switching, if the internet stops working, the old setting is put back automatically. Switch it off any time in the dashboard; it is never switched back on once you decide. *Honest limits:* Quad9 sees the website names you look up (it says it does not keep your IP address); browsers that use their own secure-DNS setting skip it; a brand-new bad site that is not on any list yet is not stopped.
+
+## Known-Bad Site Stop
+
+**In plain words:** the fast bad-site check (every 2 seconds) already tells you when your PC looks up a site on the signed bad-sites list. In Pro, Invisibly now also makes Windows refuse to look that **one exact name** up again for 24 hours, so it cannot load. After 24 hours the block removes itself.
+
+Only that single name is affected, never a whole shared host that thousands of good sites use, and never Microsoft, Windows Update, GitHub or Invisibly's own list. Free tells you and leaves the blocking to you. A switch in Advanced > Protections turns it off and lifts every block at once; `C:\ProgramData\Invisibly\guard_disabled.txt` also makes every guard alert-only. *Honest limits:* it needs administrator approval; a browser with its own secure-DNS setting never asks Windows and is neither seen nor stopped; a page that is already open keeps working until you close it; the block is by name, so a bad site reached by its raw address is not stopped.
+
+## Keeping Itself Up to Date (without new code)
+
+**In plain words:** once a day Invisibly can fetch one signed file. It holds new bad programs and websites, and now also a short list of tuning rules. It never downloads or runs code, and it never sends anything about you.
+
+- **The signed list** (bad programs, websites, remote-access tools, out-of-date apps) is checked against a built-in public key. A file with a wrong signature, or an older one than you already have, is ignored.
+- **The rules** are only names and numbers: extra programs and sites that must never be touched, extra well-known developer tools, and stricter limits for the runaway-program and secret-thief stops. A rule can only make Invisibly **more** careful: the built-in numbers are the lowest allowed, so a rule can never make a guard trigger more easily.
+- It learns your PC locally too: the saved baseline accepts what you accept, and the **Allow** button teaches it about one item you own. Nothing from your PC is ever sent back to improve it.
+
+## Everyday Helpers
+
+- **This week:** a plain-English summary of the last 7 days (what was found, what was fixed), worked out on your PC from the timeline.
+- **Needs your attention:** a short list of the alert-only findings worth a look (a new user account, a new remote-access tool...), each in one plain sentence.
+- **Allow ("This is mine"):** for the few alerts that can be your own doing (such as a browser add-on you built), accept that single item instead of resetting everything. Deliberately **not** offered for anything a thief could use to hide: new keyboards, remote tools, startup entries, accounts, the secret-theft guard.
+- **Safe repairs:** before a repair that can change how the network behaves (DNS, hosts, proxy, firewall), Invisibly saves the old setting and tests the connection. If the internet worked before and stopped after the repair, the old setting is put back.
+- **No repair loops:** a repair that keeps failing waits 2, 4, 8 minutes... (up to 6 hours) before trying again, so it never hammers your PC or fills the timeline.
+- **Stopped-unexpectedly notice:** if Invisibly stopped in a way that is not a reboot, a log-off or an update (for example something ended it on purpose), it tells you the next time it starts.
+- **Locked dashboard:** every request except the page itself needs a code that changes every 30 seconds, so another program on your PC cannot press the buttons.
+
 ## Real-Time Ransomware Watch
 
 **In plain words:** ransomware locks your files and demands money. This watches your most important folders live and, if a program starts scrambling files, freezes (pauses) that program before it does more damage. Nothing is deleted, and you decide what happens next.
@@ -328,6 +392,24 @@ On either, it measures which program is writing the most data. If that program i
 - Pro feature. Offline: signature checks never touch the network
 - Fixed to these four folders on purpose — not user-editable yet, and deliberately not extended to a whole drive (more folders means more background noise, and Windows can start silently dropping change notifications under heavy load)
 - Guard files are hidden system files named `!0_invisibly_guard_do_not_edit.docx`. If you uninstall Invisibly they stay behind — safe to delete
+
+## Secret-Thief Stop
+
+**In plain words:** a data thief sweeps a PC for anything that looks like a key, a password list or a wallet. Invisibly leaves 5 fake ones that no honest program opens. A person may open one by mistake, so one touch is only an alert. A program that opens **3 or more different** fake files in a short time is sweeping.
+
+When that program runs from a folder any user can write to (Downloads, Temp, AppData), in Pro Invisibly freezes it, ends it and records it in the timeline. Without Pro it records and tells you. It never touches Windows, Program Files, Invisibly or Defender, and it only ends the program whose full file path matches the event, never another program with the same name. A switch in Advanced > Protections turns it off, and `C:\ProgramData\Invisibly\guard_disabled.txt` makes every process guard alert-only.
+
+*Honest limits:* it only stops a thief that is still running when the next scan reads the event (about 30 seconds). A smash-and-grab that already uploaded and exited is only reported. It ends that one program, not other programs it started. The watch on real secret folders (browser, wallets, key folders) relies on Windows' Controlled Folder Access reporting the access; Windows may not report every read, so this is an extra alarm, not a lock.
+
+## Runaway-Program Stop
+
+**In plain words:** a "fork bomb" is a program that keeps starting copies of itself, each copy starting more, until Windows runs out of room and the whole PC freezes. This stops one before that happens.
+
+Every 2 seconds Invisibly looks at the list of running programs. It acts only when at least 150 new copies of the same program started within 15 seconds **and** they started each other in a chain at least 4 generations deep. A browser opening many tabs or a build tool starting helpers does not match: those start from one parent, a chain only 2 generations deep. Only the copies in that chain are touched; anything that was already running is not. Core Windows programs (sign-in, services, Explorer and similar) and Invisibly itself are never touched.
+
+In Pro, Invisibly first freezes the whole chain so it cannot start more copies, catches the copies started in the meantime, then ends them, and records it in the timeline. Without Pro it only records and tells you. A switch in Advanced > Protections turns it off, and creating the file `C:\ProgramData\Invisibly\guard_disabled.txt` makes every process guard alert-only.
+
+*Honest limit:* it runs in user mode. A bomb that freezes the PC faster than a 2-second look, or one that runs with kernel-level power, can still win. It ends nothing outside the detected chain.
 
 ## Hidden Crypto-Miner Pause
 
@@ -381,6 +463,14 @@ http://127.0.0.1:12790/dashboard
 - Run Auto-Repair
 - Reset Baseline (accept how your PC is right now as the new "normal")
 - Rollback Changes
+- Allow (accept one alert that is yours)
+- Pause Invisibly for 1 hour (it always switches itself back on)
+- Safe Browsing switch (Quad9 DNS)
+- Advanced > Protections: a switch for each optional protection
+- This week, and Needs your attention
+- Copy or save a plain-text report (the "This week" card, or the full report)
+- See which folders the ransomware watch is guarding
+- A quiet notice when a newer version of Invisibly is available
 - Verify Trust
 - Restart Daemon
 - Scan for Issues (read-only check of every signal; changes nothing)
@@ -389,11 +479,15 @@ http://127.0.0.1:12790/dashboard
 
 | | Free | Pro (Microsoft Store subscription) |
 |---|:---:|:---:|
-| Detects changes to all 56 security signals | ✅ | ✅ |
+| Detects changes to all 58 security signals | ✅ | ✅ |
 | Alerts, integrity score, trust level, dashboard | ✅ | ✅ |
 | Automatic repair of unsafe changes | ❌ | ✅ |
 | Ghost Mode (public Wi-Fi lock-down) | ❌ | ✅ |
 | Ransomware and hidden crypto-miner pause | ❌ | ✅ |
+| Runaway-program stop (fork bombs) | ❌ | ✅ |
+| Secret-thief stop (program sweeping the fake secret files) | ❌ | ✅ |
+| Known-bad site stop (24-hour name block) | ❌ | ✅ |
+| Safe Browsing (Quad9 DNS) and the signed list updates | ✅ | ✅ |
 
 ## Requirements
 

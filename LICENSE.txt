@@ -45,7 +45,7 @@ Windows security settings on this PC to restore them to their saved safe state.
 6. THIRD-PARTY SERVICES
 Invisibly works offline. Optional features use third parties: the Microsoft
 Store (updates and subscription billing), GitHub (the once-a-day security-list
-download) and Quad9 (Safe Browsing, only if you switch it on). Their own terms
+download) and Quad9 (Safe Browsing, on by default unless you or your company set your own DNS; it can be switched off). Their own terms
 and privacy policies apply to those services.
 
 7. LIABILITY
