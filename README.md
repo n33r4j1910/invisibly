@@ -511,6 +511,12 @@ http://127.0.0.1:12790/dashboard
 
 endpoint integrity, configuration monitoring, behavior-based detection, DNS hijacking, ARP spoofing, hosts file protection, firewall monitoring, defender monitoring, UAC protection, Windows Update monitoring, System Restore protection, SmartScreen monitoring, Bluetooth security, HID protection, RDP protection, homoglyph detection, zero-width attacks, Unicode bidi attacks, brute force detection, proxy monitoring, root CA monitoring, scheduled tasks monitoring, startup persistence, Windows Services monitoring, Ghost Mode, public WiFi protection, stealth mode, integrity score, trust level, security baseline, auto-repair, self-healing, tamper detection, DPAPI encryption, ransomware detection, real-time file monitoring, configuration drift detection, offline security, no telemetry, privacy-first, lightweight, Windows security, Rust, autonomous endpoint protection, security timeline, Defender exclusions, Tamper Protection, SMBv1, LSASS protection, Office macros, Windows Script Host, hidden startup hooks, quiet security
 
+## Third-party notices
+
+MITRE ATT&CK® is a registered trademark of The MITRE Corporation. Invisibly maps some alerts to ATT&CK technique IDs for reference only. This is our own mapping; it is not endorsed or certified by MITRE.
+
+© 2015-2026 The MITRE Corporation. The ATT&CK data is reproduced and distributed with the permission of The MITRE Corporation, under the ATT&CK Terms of Use (https://attack.mitre.org/resources/legal-and-branding/terms-of-use/).
+
 ## License
 
 *Proprietary — All Rights Reserved*

@@ -62,4 +62,8 @@ Upon termination, the user must cease all use and delete the Software.
 9. GOVERNING LAW
 This agreement shall be governed by the laws of India.
 
+Third-party notice
+MITRE ATT&CK® is a registered trademark of The MITRE Corporation. Invisibly maps some alerts to ATT&CK technique IDs for reference only. This is our own mapping; it is not endorsed or certified by MITRE.
+© 2015-2026 The MITRE Corporation. The ATT&CK data is reproduced and distributed with the permission of The MITRE Corporation, under the ATT&CK Terms of Use (https://attack.mitre.org/resources/legal-and-branding/terms-of-use/).
+
 © 2026 DeltaIQx LLP. All rights reserved.
